@@ -1,0 +1,13 @@
+.gradle/
+.build/
+**/build/
+local.properties
+*.iml
+.idea/
+*.apk
+*.keystore
+*.jks
+# Local captures can contain device names, addresses and input text.
+diagnostics/
+screenshots/
+reference/
