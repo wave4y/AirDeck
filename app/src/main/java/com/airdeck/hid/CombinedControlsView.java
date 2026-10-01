@@ -17,11 +17,12 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
-/** Shared complete 87-key keyboard for keyboard-only and simultaneous keyboard/mouse modes. */
+/** Standard or simple keyboard, with optional independently arranged mouse controls. */
 public final class CombinedControlsView extends LinearLayout {
     private static final int INK=0xFF192D29,MINT=0xFFDCECD9,WHITE=0xFFFFFFFF;
     private final HidController hid;
     private final boolean landscape;
+    private final KeyboardPreset preset;
     private final KeyboardView.Session keyboardSession;
     private final KeyboardView keyboard;
     private final List<MouseTouch> mouseTouches=new ArrayList<>();
@@ -29,19 +30,23 @@ public final class CombinedControlsView extends LinearLayout {
     private int padMouseButtons,physicalMouseButtons;
     private boolean haptics=true;
     public CombinedControlsView(Context context,HidController controller){this(context,controller,false);}
-    public CombinedControlsView(Context context,HidController controller,boolean keyboardOnly){
-        super(context);hid=controller;
+    public CombinedControlsView(Context context,HidController controller,boolean keyboardOnly){this(context,controller,keyboardOnly,KeyboardPreset.STANDARD);}
+    public CombinedControlsView(Context context,HidController controller,boolean keyboardOnly,KeyboardPreset preset){
+        super(context);hid=controller;this.preset=preset==null?KeyboardPreset.STANDARD:preset;
         landscape=getResources().getConfiguration().orientation==Configuration.ORIENTATION_LANDSCAPE;
         setOrientation(landscape?HORIZONTAL:VERTICAL);setMotionEventSplittingEnabled(true);
         keyboardSession=new KeyboardView.Session(controller);
-        KeyboardLayout.Area keyboardArea=keyboardOnly?(landscape?KeyboardLayout.Area.FULL:KeyboardLayout.Area.PORTRAIT_FULL)
+        KeyboardLayout.Area keyboardArea=this.preset==KeyboardPreset.SIMPLE
+                ?(keyboardOnly?KeyboardLayout.Area.SIMPLE_FULL:KeyboardLayout.Area.SIMPLE_MAIN)
+                :keyboardOnly?(landscape?KeyboardLayout.Area.FULL:KeyboardLayout.Area.PORTRAIT_FULL)
                 :(landscape?KeyboardLayout.Area.COMPACT_MAIN:KeyboardLayout.Area.PORTRAIT_MAIN);
         keyboard=new KeyboardView(context,keyboardSession,keyboardArea);
         if(keyboardOnly){addView(keyboard,new LayoutParams(LayoutParams.MATCH_PARENT,LayoutParams.MATCH_PARENT));return;}
         LinearLayout mouse=buildMouse();
         if(landscape){
-            addView(keyboard,new LayoutParams(0,LayoutParams.MATCH_PARENT,.65f));
-            LayoutParams m=new LayoutParams(0,LayoutParams.MATCH_PARENT,.35f);m.leftMargin=dp(10);addView(mouse,m);
+            float keyboardWeight=this.preset==KeyboardPreset.SIMPLE?.62f:.65f;
+            addView(keyboard,new LayoutParams(0,LayoutParams.MATCH_PARENT,keyboardWeight));
+            LayoutParams m=new LayoutParams(0,LayoutParams.MATCH_PARENT,1-keyboardWeight);m.leftMargin=dp(10);addView(mouse,m);
         }else{
             LayoutParams m=new LayoutParams(LayoutParams.MATCH_PARENT,0,.42f);m.bottomMargin=dp(10);addView(mouse,m);
             addView(keyboard,new LayoutParams(LayoutParams.MATCH_PARENT,0,.58f));
@@ -52,9 +57,11 @@ public final class CombinedControlsView extends LinearLayout {
     public void setKeyboardLeds(int leds){keyboard.setKeyboardLeds(leds);}
     public void refreshKeyboardLeds(){keyboard.refreshKeyboardLeds();}
     private LinearLayout buildMouse(){
-        LinearLayout panel=column();
-        KeyboardView editKeys=new KeyboardView(getContext(),keyboardSession,landscape?KeyboardLayout.Area.EDIT:KeyboardLayout.Area.EDIT_ROW);
-        LayoutParams ep=landscape?new LayoutParams(LayoutParams.MATCH_PARENT,0,.18f):new LayoutParams(LayoutParams.MATCH_PARENT,dp(34));ep.bottomMargin=dp(6);panel.addView(editKeys,ep);
+        MousePanel panel=new MousePanel();
+        if(preset==KeyboardPreset.STANDARD){
+            KeyboardView editKeys=new KeyboardView(getContext(),keyboardSession,landscape?KeyboardLayout.Area.EDIT:KeyboardLayout.Area.EDIT_ROW);
+            LayoutParams ep=landscape?new LayoutParams(LayoutParams.MATCH_PARENT,0,.18f):new LayoutParams(LayoutParams.MATCH_PARENT,dp(34));ep.bottomMargin=dp(6);panel.addView(editKeys,ep);panel.editRow=editKeys;
+        }
         pad=new TouchpadView(getContext());pad.setCompact(true);
         pad.setListener(new TouchpadView.Listener(){
             @Override public void mouseMove(int dx,int dy){hid.mouseMove(dx,dy);}
@@ -68,9 +75,28 @@ public final class CombinedControlsView extends LinearLayout {
         MouseTouch l=new MouseTouch(left,1),r=new MouseTouch(right,2);left.setOnTouchListener(l);right.setOnTouchListener(r);mouseTouches.add(l);mouseTouches.add(r);
         clicks.addView(left,new LayoutParams(0,LayoutParams.MATCH_PARENT,1));
         LayoutParams rp=new LayoutParams(0,LayoutParams.MATCH_PARENT,1);rp.leftMargin=dp(6);clicks.addView(right,rp);
-        LayoutParams cp=new LayoutParams(LayoutParams.MATCH_PARENT,dp(landscape?32:36));cp.topMargin=dp(6);panel.addView(clicks,cp);
+        LayoutParams cp=new LayoutParams(LayoutParams.MATCH_PARENT,dp(landscape?32:36));cp.topMargin=dp(6);panel.addView(clicks,cp);panel.clickRow=clicks;
         KeyboardView arrows=new KeyboardView(getContext(),keyboardSession,landscape?KeyboardLayout.Area.ARROWS:KeyboardLayout.Area.ARROW_ROW);
-        LayoutParams ap=landscape?new LayoutParams(LayoutParams.MATCH_PARENT,0,.24f):new LayoutParams(LayoutParams.MATCH_PARENT,dp(34));ap.topMargin=dp(6);panel.addView(arrows,ap);return panel;
+        LayoutParams ap=landscape?new LayoutParams(LayoutParams.MATCH_PARENT,0,.24f):new LayoutParams(LayoutParams.MATCH_PARENT,dp(34));ap.topMargin=dp(6);panel.addView(arrows,ap);panel.arrowRow=arrows;return panel;
+    }
+    /** Keep the portrait touch surface usable even when headers or selectors reduce height. */
+    private final class MousePanel extends LinearLayout {
+        View editRow,clickRow,arrowRow;
+        MousePanel(){super(CombinedControlsView.this.getContext());setOrientation(VERTICAL);setMotionEventSplittingEnabled(true);}
+        @Override protected void onMeasure(int widthSpec,int heightSpec){
+            if(!landscape){
+                int height=Math.max(0,MeasureSpec.getSize(heightSpec)-getPaddingTop()-getPaddingBottom());
+                int gap=Math.min(dp(6),(int)(height*.025f));
+                // With all three rows: <=44% rows + <=7.5% gaps leaves >=48.5% for the pad.
+                if(editRow!=null)sizeRow(editRow,Math.min(dp(34),(int)(height*.14f)),0,gap);
+                if(clickRow!=null)sizeRow(clickRow,Math.min(dp(36),(int)(height*.16f)),gap,0);
+                if(arrowRow!=null)sizeRow(arrowRow,Math.min(dp(34),(int)(height*.14f)),gap,0);
+            }
+            super.onMeasure(widthSpec,heightSpec);
+        }
+        private void sizeRow(View row,int height,int top,int bottom){
+            LayoutParams lp=(LayoutParams)row.getLayoutParams();lp.height=height;lp.topMargin=top;lp.bottomMargin=bottom;
+        }
     }
     private void setMouseSource(boolean fromPad,int mask,boolean down){
         if(down&&!hid.isConnected())return;

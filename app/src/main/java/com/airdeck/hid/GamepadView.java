@@ -23,7 +23,7 @@ public final class GamepadView extends View {
     private final Paint paint=new Paint(Paint.ANTI_ALIAS_FLAG);
     private final SparseArray<Finger> fingers=new SparseArray<>();
     private final RectF[] boxes=new RectF[10];
-    private final float[] buttonX=new float[4], buttonY=new float[4];
+    private final float[] buttonX=new float[6], buttonY=new float[6], faceRadius=new float[6];
     private final RectF ltBox=new RectF(), rtBox=new RectF();
     private Listener listener;
     private GamepadPreset preset=GamepadPreset.XBOX;
@@ -57,7 +57,7 @@ public final class GamepadView extends View {
     }
     private void updateDescription(){
         setContentDescription(preset.label+" 游戏手柄。"+preset.description+"，支持多点触控。"+
-                (preset==GamepadPreset.PSP?"包含 L、R、Select 和 Start。":"包含肩键、扳机、菜单键和左右摇杆按下。"));
+                preset.mappingDescription());
     }
 
     @Override protected void onSizeChanged(int w,int h,int oldw,int oldh){
@@ -73,12 +73,16 @@ public final class GamepadView extends View {
         for(RectF box:boxes)box.setEmpty();ltBox.setEmpty();rtBox.setEmpty();
         float shoulderW=wide?68:50, shoulderH=wide?40:32;
         float pad=wide?24:14, top=wide?18:14, gap=wide?10:7;
-        boxes[4].set(pad,top,pad+shoulderW,top+shoulderH);
-        boxes[5].set(layoutW-pad-shoulderW,top,layoutW-pad,top+shoulderH);
-        if(preset.hasTriggers()){
-            ltBox.set(pad+shoulderW+gap,top,pad+2*shoulderW+gap,top+shoulderH);
-            rtBox.set(layoutW-pad-2*shoulderW-gap,top,layoutW-pad-shoulderW-gap,top+shoulderH);
+        if(preset.hasShoulders()){
+            boxes[4].set(pad,top,pad+shoulderW,top+shoulderH);
+            boxes[5].set(layoutW-pad-shoulderW,top,layoutW-pad,top+shoulderH);
         }
+        if(preset.hasLeftTrigger())ltBox.set(pad+shoulderW+gap,top,pad+2*shoulderW+gap,top+shoulderH);
+        if(preset.hasRightTrigger())rtBox.set(layoutW-pad-2*shoulderW-gap,top,layoutW-pad-shoulderW-gap,top+shoulderH);
+        for(int i=0;i<faceRadius.length;i++)faceRadius[i]=0;
+        if(preset==GamepadPreset.ARCADE){layoutArcade();return;}
+        if(preset.isClassic()){layoutClassic();return;}
+        if(preset==GamepadPreset.N64){layoutN64();return;}
         if(wide){
             stickR=preset==GamepadPreset.PSP?58:64;
             dpadR=preset.hasOffsetSticks()?59:62;buttonR=preset==GamepadPreset.PSP?28:26;
@@ -112,12 +116,60 @@ public final class GamepadView extends View {
             }
         }
     }
+    private void layoutArcade(){
+        // Two gently arced rows provide six independent buttons, including chords.
+        if(wide){
+            leftX=200;leftY=212;stickR=91;
+            setFaceButton(0,548,159,40);setFaceButton(1,643,141,40);setFaceButton(2,738,159,40);
+            setFaceButton(3,557,258,40);setFaceButton(4,652,240,40);setFaceButton(5,747,258,40);
+            setCenteredBox(boxes[6],369,333,74,34);setCenteredBox(boxes[7],465,333,74,34);
+        }else{
+            leftX=80;leftY=210;stickR=62;
+            setFaceButton(0,198,178,24);setFaceButton(1,258,164,24);setFaceButton(2,318,178,24);
+            setFaceButton(3,198,242,24);setFaceButton(4,258,228,24);setFaceButton(5,318,242,24);
+            setCenteredBox(boxes[6],139,348,62,30);setCenteredBox(boxes[7],221,348,62,30);
+        }
+    }
+    private void layoutClassic(){
+        if(wide){
+            dpadX=166;dpadY=205;dpadR=preset==GamepadPreset.SNES?74:80;
+            if(preset==GamepadPreset.SNES){buttonR=33;setFaceButtons(689,202,65);}
+            else if(preset==GamepadPreset.GBA){setFaceButton(0,724,177,45);setFaceButton(1,614,239,45);}
+            else{setFaceButton(0,726,204,45);setFaceButton(1,613,204,45);}
+            setCenteredBox(boxes[6],374,323,72,34);setCenteredBox(boxes[7],466,323,72,34);
+            if(preset.hasShoulders()){
+                setCenteredBox(boxes[4],111,39,112,40);setCenteredBox(boxes[5],729,39,112,40);
+            }
+        }else{
+            dpadX=82;dpadY=203;dpadR=preset==GamepadPreset.SNES?54:56;
+            if(preset==GamepadPreset.SNES){buttonR=22;setFaceButtons(274,203,42);}
+            else if(preset==GamepadPreset.GBA){setFaceButton(0,294,175,30);setFaceButton(1,224,231,30);}
+            else{setFaceButton(0,296,206,30);setFaceButton(1,223,206,30);}
+            setCenteredBox(boxes[6],139,336,62,30);setCenteredBox(boxes[7],221,336,62,30);
+        }
+    }
+    private void layoutN64(){
+        if(wide){
+            dpadX=126;dpadY=151;dpadR=57;
+            leftX=278;leftY=275;stickR=67;
+            setFaceButton(0,640,286,36);setFaceButton(1,551,234,31);
+            setFaceButton(2,680,147,25);setFaceButton(3,776,147,25);
+            setFaceButton(4,728,99,25);setFaceButton(5,728,195,25);
+            setCenteredBox(boxes[7],420,143,68,34);
+        }else{
+            dpadX=72;dpadY=135;dpadR=45;
+            leftX=96;leftY=295;stickR=54;
+            setFaceButton(0,280,285,28);setFaceButton(1,211,231,25);
+            setFaceButton(2,250,139,18);setFaceButton(3,320,139,18);
+            setFaceButton(4,285,104,18);setFaceButton(5,285,174,18);
+            setCenteredBox(boxes[7],221,358,66,30);
+        }
+    }
     private static void setCenteredBox(RectF r,float x,float y,float w,float h){r.set(x-w/2,y-h/2,x+w/2,y+h/2);}
+    private void setFaceButton(int index,float x,float y,float radius){buttonX[index]=x;buttonY[index]=y;faceRadius[index]=radius;}
     private void setFaceButtons(float x,float y,float offset){
-        buttonX[0]=x;buttonY[0]=y+offset;
-        buttonX[1]=x+offset;buttonY[1]=y;
-        buttonX[2]=x-offset;buttonY[2]=y;
-        buttonX[3]=x;buttonY[3]=y-offset;
+        setFaceButton(0,x,y+offset,buttonR);setFaceButton(1,x+offset,y,buttonR);
+        setFaceButton(2,x-offset,y,buttonR);setFaceButton(3,x,y-offset,buttonR);
     }
     @Override protected void onDraw(Canvas c){
         super.onDraw(c);
@@ -126,16 +178,18 @@ public final class GamepadView extends View {
         c.drawRoundRect(new RectF(0,0,getWidth(),getHeight()),radius,radius,paint);
         if(getWidth()<=0||getHeight()<=0)return;
         c.save();c.translate(offsetX,offsetY);c.scale(scale,scale);
-        drawShoulder(c,boxes[4],preset.shoulderLabel(false,false),(buttons&(1<<4))!=0,false);
-        drawShoulder(c,boxes[5],preset.shoulderLabel(true,false),(buttons&(1<<5))!=0,true);
-        if(preset.hasTriggers()){
-            drawShoulder(c,ltBox,preset.shoulderLabel(false,true),lt>0,false);
-            drawShoulder(c,rtBox,preset.shoulderLabel(true,true),rt>0,true);
+        if(preset.hasShoulders()){
+            drawShoulder(c,boxes[4],preset.shoulderLabel(false,false),(buttons&(1<<4))!=0,false);
+            drawShoulder(c,boxes[5],preset.shoulderLabel(true,false),(buttons&(1<<5))!=0,true);
         }
-        drawDpad(c);drawStick(c,leftX,leftY,lx,ly,false);
+        if(preset.hasLeftTrigger())drawShoulder(c,ltBox,preset.shoulderLabel(false,true),lt>0,false);
+        if(preset.hasRightTrigger())drawShoulder(c,rtBox,preset.shoulderLabel(true,true),rt>0,true);
+        if(preset.hasDpad())drawDpad(c);
+        if(preset.hasLeftStick())drawStick(c,leftX,leftY,lx,ly,false);
         if(preset.hasRightStick())drawStick(c,rightX,rightY,rx,ry,true);
-        for(int i=0;i<4;i++)drawFaceButton(c,i);
-        drawSmall(c,6,preset.menuLabel(false));drawSmall(c,7,preset.menuLabel(true));
+        for(int i=0;i<preset.faceButtonCount();i++)drawFaceButton(c,i);
+        if(preset.hasSelectButton())drawSmall(c,6,preset.menuLabel(false));
+        drawSmall(c,7,preset.menuLabel(true));
         if(preset.hasStickClicks()){
             drawSmall(c,8,preset==GamepadPreset.SWITCH?"L PRESS":"L3");
             drawSmall(c,9,preset==GamepadPreset.SWITCH?"R PRESS":"R3");
@@ -146,21 +200,39 @@ public final class GamepadView extends View {
     private int sideAccent(boolean right){
         if(preset==GamepadPreset.SWITCH)return right?Color.rgb(238,133,127):Color.rgb(119,196,216);
         if(preset==GamepadPreset.PS5)return Color.rgb(219,225,236);
+        if(preset==GamepadPreset.ARCADE)return Color.rgb(239,190,127);
+        if(preset==GamepadPreset.GBA)return Color.rgb(192,177,237);
+        if(preset==GamepadPreset.NES)return Color.rgb(229,146,137);
         return MINT;
     }
-    private int faceAccent(int bit){
-        if(preset.usesPlayStationSymbols())return new int[]{0xFF99BFEA,0xFFED969D,0xFFE1A6CC,0xFF8DD5BB}[bit];
+    private int faceAccent(int index){
+        if(preset.usesPlayStationSymbols())return new int[]{0xFF99BFEA,0xFFED969D,0xFFE1A6CC,0xFF8DD5BB}[index];
         if(preset==GamepadPreset.SWITCH)return WHITE;
-        return new int[]{0xFFAEDEA6,0xFFEB988E,0xFF97BFE4,0xFFE9D390}[bit];
+        if(preset==GamepadPreset.GBA)return 0xFFC0B1ED;
+        if(preset==GamepadPreset.NES)return 0xFFE59289;
+        if(preset==GamepadPreset.SNES)return new int[]{0xFFE9D390,0xFFEB988E,0xFFAEDEA6,0xFF97BFE4}[index];
+        if(preset==GamepadPreset.N64)return index==0?0xFFAEDEA6:(index==1?0xFF97BFE4:0xFFE9D390);
+        if(preset==GamepadPreset.ARCADE)return index<3?0xFFB6E6B9:0xFFEFBE7F;
+        return new int[]{0xFFAEDEA6,0xFFEB988E,0xFF97BFE4,0xFFE9D390}[index];
     }
-    private void drawFaceButton(Canvas c,int bit){
-        boolean pressed=(buttons&(1<<bit))!=0;float x=buttonX[bit],y=buttonY[bit];int color=faceAccent(bit);
-        paint.setStyle(Paint.Style.FILL);paint.setColor(Color.argb(55,0,0,0));c.drawCircle(x,y+3,buttonR,paint);
-        paint.setColor(pressed?color:Color.rgb(48,62,54));c.drawCircle(x,y,buttonR,paint);
-        paint.setStyle(Paint.Style.STROKE);paint.setStrokeWidth(1.2f);paint.setColor(pressed?color:Color.rgb(77,97,84));c.drawCircle(x,y,buttonR,paint);
+    private void drawFaceButton(Canvas c,int index){
+        boolean pressed=(buttons&(1<<preset.faceHidBit(index)))!=0;
+        float x=buttonX[index],y=buttonY[index],r=faceRadius[index];int color=faceAccent(index);
+        paint.setStyle(Paint.Style.FILL);paint.setColor(Color.argb(55,0,0,0));c.drawCircle(x,y+3,r,paint);
+        paint.setColor(pressed?color:Color.rgb(48,62,54));c.drawCircle(x,y,r,paint);
+        paint.setStyle(Paint.Style.STROKE);paint.setStrokeWidth(1.2f);paint.setColor(pressed?color:Color.rgb(77,97,84));c.drawCircle(x,y,r,paint);
         paint.setStyle(Paint.Style.FILL);
-        if(preset.usesPlayStationSymbols())drawPlayStationSymbol(c,bit,x,y,buttonR*.39f,pressed?INK:color);
-        else text(c,preset.faceLabel(bit),x,y,buttonR*.74f,pressed?INK:color,true);
+        if(preset.usesPlayStationSymbols())drawPlayStationSymbol(c,index,x,y,r*.39f,pressed?INK:color);
+        else if(preset==GamepadPreset.N64&&index>=2)drawCButton(c,index,x,y,r,pressed?INK:color);
+        else text(c,preset.faceLabel(index),x,y,preset==GamepadPreset.ARCADE?r*.46f:r*.74f,pressed?INK:color,true);
+    }
+    private void drawCButton(Canvas c,int index,float x,float y,float r,int color){
+        // C arrows are separate buttons so diagonal combinations remain possible.
+        text(c,"C",x,y-r*.30f,r*.44f,color,true);
+        float cx=x,cy=y+r*.32f,size=r*.22f;
+        c.save();c.rotate(index==2?270:index==3?90:index==5?180:0,cx,cy);
+        Path arrow=new Path();arrow.moveTo(cx,cy-size);arrow.lineTo(cx-size,cy+size*.65f);arrow.lineTo(cx+size,cy+size*.65f);arrow.close();
+        paint.setStyle(Paint.Style.FILL);paint.setColor(color);c.drawPath(arrow,paint);c.restore();
     }
     /** Paths avoid depending on a phone font for cross/circle/square/triangle glyphs. */
     private void drawPlayStationSymbol(Canvas c,int bit,float x,float y,float r,int color){
@@ -250,17 +322,26 @@ public final class GamepadView extends View {
             Finger f=fingers.get(e.getPointerId(i));if(f!=null){f.x=touchX(e,i);f.y=touchY(e,i);}
         }
     }
-    private boolean buttonVisible(int bit){return bit<8||preset.hasStickClicks();}
+    private boolean buttonVisible(int bit){
+        if(bit==4||bit==5)return preset.hasShoulders();
+        if(bit==6)return preset.hasSelectButton();
+        if(bit==7)return true;
+        return (bit==8||bit==9)&&preset.hasStickClicks();
+    }
+    // Extra face controls need independent IDs: their HID bits can also be shoulder/stick-click bits.
+    private static int faceControl(int index){return index<4?index:index+6;}
+    private int faceIndex(int control){
+        int index=control>=0&&control<4?control:(control==10||control==11?control-6:-1);
+        return index>=0&&index<preset.faceButtonCount()?index:-1;
+    }
     private int hit(float x,float y){
         for(int i=4;i<10;i++)if(buttonVisible(i)&&expandedContains(boxes[i],x,y,5))return i;
-        if(preset.hasTriggers()){
-            if(expandedContains(ltBox,x,y,4))return LEFT_TRIGGER;
-            if(expandedContains(rtBox,x,y,4))return RIGHT_TRIGGER;
-        }
-        for(int i=0;i<4;i++)if(distance(x-buttonX[i],y-buttonY[i])<=buttonR+5)return i;
-        if(distance(x-leftX,y-leftY)<=stickR+8)return LEFT_STICK;
+        if(preset.hasLeftTrigger()&&expandedContains(ltBox,x,y,4))return LEFT_TRIGGER;
+        if(preset.hasRightTrigger()&&expandedContains(rtBox,x,y,4))return RIGHT_TRIGGER;
+        for(int i=0;i<preset.faceButtonCount();i++)if(distance(x-buttonX[i],y-buttonY[i])<=faceRadius[i]+5)return faceControl(i);
+        if(preset.hasLeftStick()&&distance(x-leftX,y-leftY)<=stickR+8)return LEFT_STICK;
         if(preset.hasRightStick()&&distance(x-rightX,y-rightY)<=stickR+8)return RIGHT_STICK;
-        if(Math.abs(x-dpadX)<=dpadR+6&&Math.abs(y-dpadY)<=dpadR+6)return DPAD;
+        if(preset.hasDpad()&&Math.abs(x-dpadX)<=dpadR+6&&Math.abs(y-dpadY)<=dpadR+6)return DPAD;
         return -1;
     }
     private static boolean expandedContains(RectF r,float x,float y,float extra){
@@ -270,18 +351,19 @@ public final class GamepadView extends View {
     private void dispatchState(boolean force){
         int b=0,h=8,lxValue=0,lyValue=0,rxValue=0,ryValue=0,ltValue=0,rtValue=0;
         for(int i=0;i<fingers.size();i++){
-            Finger f=fingers.valueAt(i);int control=f.control;
-            if(control>=0&&control<10&&buttonVisible(control)){
-                boolean within=control<4?distance(f.x-buttonX[control],f.y-buttonY[control])<buttonR+22:expandedContains(boxes[control],f.x,f.y,18);
-                if(within)b|=1<<control;
-            }else if(control==LEFT_TRIGGER&&preset.hasTriggers()){
+            Finger f=fingers.valueAt(i);int control=f.control,face=faceIndex(control);
+            if(face>=0){
+                if(distance(f.x-buttonX[face],f.y-buttonY[face])<faceRadius[face]+22)b|=1<<preset.faceHidBit(face);
+            }else if(control>=4&&control<10&&buttonVisible(control)){
+                if(expandedContains(boxes[control],f.x,f.y,18))b|=1<<control;
+            }else if(control==LEFT_TRIGGER&&preset.hasLeftTrigger()){
                 if(expandedContains(ltBox,f.x,f.y,20))ltValue=255;
-            }else if(control==RIGHT_TRIGGER&&preset.hasTriggers()){
+            }else if(control==RIGHT_TRIGGER&&preset.hasRightTrigger()){
                 if(expandedContains(rtBox,f.x,f.y,20))rtValue=255;
-            }else if(control==DPAD){
+            }else if(control==DPAD&&preset.hasDpad()){
                 float dx=f.x-dpadX,dy=f.y-dpadY;
                 if(distance(dx,dy)>dpadR*.20f){double angle=Math.atan2(dx,-dy);h=((int)Math.round(angle/(Math.PI/4))+8)%8;}
-            }else if(control==LEFT_STICK||(control==RIGHT_STICK&&preset.hasRightStick())){
+            }else if((control==LEFT_STICK&&preset.hasLeftStick())||(control==RIGHT_STICK&&preset.hasRightStick())){
                 float x=f.x-(control==LEFT_STICK?leftX:rightX),y=f.y-(control==LEFT_STICK?leftY:rightY);
                 float magnitude=distance(x,y),limit=stickR*.82f;int ax=0,ay=0;
                 if(magnitude>limit*.09f){

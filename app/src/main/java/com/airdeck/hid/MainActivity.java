@@ -49,6 +49,7 @@ public final class MainActivity extends Activity implements HidController.Listen
     private TouchpadView pad;
     private GamepadView gamepad;
     private GamepadPreset gamepadPreset=GamepadPreset.XBOX;
+    private KeyboardPreset keyboardPreset=KeyboardPreset.STANDARD,comboPreset=KeyboardPreset.STANDARD;
     private CombinedControlsView combined;
     private int tab=0, padMouseButtons=0, physicalMouseButtons=0;
     private float sensitivity=1.35f;
@@ -74,6 +75,8 @@ public final class MainActivity extends Activity implements HidController.Listen
         haptics=prefs.getBoolean("haptics",true);
         try{gamepadPreset=GamepadPreset.valueOf(prefs.getString("gamepad_preset","XBOX"));}
         catch(IllegalArgumentException ignored){gamepadPreset=GamepadPreset.XBOX;}
+        keyboardPreset=readKeyboardPreset("keyboard_preset");
+        comboPreset=readKeyboardPreset("combo_preset");
         tab=state==null?0:state.getInt("tab",0);
 
         getWindow().setStatusBarColor(BG);
@@ -278,10 +281,40 @@ public final class MainActivity extends Activity implements HidController.Listen
         });
     }
     private void keyboardPage(){
-        pageTitle("键盘","完整 87 键 · 按住 Shift 输入大写与符号","输入文本",this::textInput);
-        combined=new CombinedControlsView(this,hid,true);
+        keyboardHeading(false);
+        combined=new CombinedControlsView(this,hid,true,keyboardPreset);
         combined.setHapticFeedback(haptics);
         body.addView(combined,new LinearLayout.LayoutParams(-1,0,1));
+    }
+    private KeyboardPreset readKeyboardPreset(String key){
+        try{return KeyboardPreset.valueOf(prefs.getString(key,"STANDARD"));}
+        catch(IllegalArgumentException ignored){return KeyboardPreset.STANDARD;}
+    }
+    private void keyboardHeading(boolean mouse){
+        if(controlFullscreen())return;
+        KeyboardPreset current=mouse?comboPreset:keyboardPreset;
+        LinearLayout heading=row();heading.setGravity(Gravity.CENTER_VERTICAL);
+        heading.addView(text(mouse?"键鼠同屏":"键盘",22,INK,true),new LinearLayout.LayoutParams(0,-2,1));
+        TextView layout=button((current==KeyboardPreset.SIMPLE?"简洁":"标准")+" ▾",true);
+        layout.setContentDescription("切换键盘布局");layout.setOnClickListener(v->chooseKeyboardPreset(mouse));
+        TextView input=button("输入文本",false);input.setOnClickListener(v->textInput());
+        TextView rotate=button("横屏",true);rotate.setOnClickListener(v->setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE));
+        for(TextView action:new TextView[]{layout,input,rotate}){
+            action.setTextSize(11);action.setPadding(dp(9),dp(9),dp(9),dp(9));
+            LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-2,dp(38));lp.leftMargin=dp(5);heading.addView(action,lp);
+        }
+        body.addView(heading);space(body,12);
+    }
+    private void chooseKeyboardPreset(boolean mouse){
+        KeyboardPreset current=mouse?comboPreset:keyboardPreset;
+        String[] labels={mouse?"标准 · 编辑、方向键独立分区":"标准 · 完整 87 键","简洁 · 常用大键"};
+        new AlertDialog.Builder(this).setTitle(mouse?"键鼠布局":"键盘布局")
+                .setSingleChoiceItems(labels,current==KeyboardPreset.SIMPLE?1:0,(dialog,index)->{
+                    releaseControls();KeyboardPreset selected=index==1?KeyboardPreset.SIMPLE:KeyboardPreset.STANDARD;
+                    if(mouse)comboPreset=selected;else keyboardPreset=selected;
+                    prefs.edit().putString(mouse?"combo_preset":"keyboard_preset",selected.name()).apply();
+                    dialog.dismiss();render();
+                }).setNegativeButton("取消",null).show();
     }
     private void textInput(){
         EditText input=new EditText(this);input.setTextColor(INK);input.setTextSize(16);input.setHint("英文、数字或拼音，例如 hello");input.setMinLines(3);input.setGravity(Gravity.TOP);input.setPadding(dp(20),dp(12),dp(20),dp(12));
@@ -296,15 +329,11 @@ public final class MainActivity extends Activity implements HidController.Listen
     private void gamepadPage(){
         if(!controlFullscreen()){
             pageTitle("游戏手柄","选择熟悉的布局，横屏开始游戏","横屏",()->setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE));
-            LinearLayout presets=row();
-            for(GamepadPreset preset:GamepadPreset.values()){
-                TextView choice=button(preset.label,preset==gamepadPreset);choice.setTextSize(12);choice.setPadding(0,0,0,0);
-                choice.setContentDescription(preset.label+" 手柄布局"+(preset==gamepadPreset?"，已选择":""));
-                choice.setSelected(preset==gamepadPreset);
-                choice.setOnClickListener(v->{if(gamepadPreset==preset)return;releaseControls();gamepadPreset=preset;prefs.edit().putString("gamepad_preset",preset.name()).apply();render();});
-                weighted(presets,choice,1,38,presets.getChildCount()==0?0:6);
-            }
-            body.addView(presets);space(body,8);
+            LinearLayout selector=row();selector.setGravity(Gravity.CENTER_VERTICAL);selector.setPadding(dp(14),dp(10),dp(14),dp(10));
+            selector.setBackground(ripple(MINT,14));selector.setContentDescription("切换手柄布局");selector.setClickable(true);selector.setFocusable(true);
+            selector.addView(text(gamepadPreset.label,17,INK,true),new LinearLayout.LayoutParams(0,-2,1));
+            selector.addView(text("布局  ▾",12,GREEN,true));selector.setOnClickListener(v->chooseGamepadPreset());
+            body.addView(selector);space(body,8);
             TextView description=text(gamepadPreset.description,11,MUTED,false);body.addView(description);space(body,10);
         }
         gamepad=new GamepadView(this);gamepad.setHapticFeedback(haptics);
@@ -315,9 +344,27 @@ public final class MainActivity extends Activity implements HidController.Listen
             TextView note=text("横屏仅显示手柄 · 系统返回可回到竖屏",10,MUTED,false);note.setGravity(Gravity.CENTER);note.setPadding(0,dp(8),0,dp(4));body.addView(note);
         }
     }
+    private void chooseGamepadPreset(){
+        LinearLayout choices=column();choices.setPadding(dp(20),dp(8),dp(20),dp(8));
+        AlertDialog dialog=new AlertDialog.Builder(this).setTitle("手柄布局").setView(choices).setNegativeButton("取消",null).create();
+        GamepadPreset[] presets=GamepadPreset.values();
+        for(int start=0;start<presets.length;start+=3){
+            LinearLayout line=row();
+            for(int column=0;column<3;column++){
+                int index=start+column;
+                if(index>=presets.length){weighted(line,new View(this),1,48,column==0?0:7);continue;}
+                GamepadPreset preset=presets[index];TextView choice=button(preset.label,preset==gamepadPreset);choice.setTextSize(13);
+                choice.setContentDescription(preset.label+" 手柄布局"+(preset==gamepadPreset?"，已选择":""));choice.setSelected(preset==gamepadPreset);
+                choice.setOnClickListener(v->{releaseControls();gamepadPreset=preset;prefs.edit().putString("gamepad_preset",preset.name()).apply();dialog.dismiss();render();});
+                weighted(line,choice,1,48,column==0?0:7);
+            }
+            choices.addView(line);if(start+3<presets.length)space(choices,8);
+        }
+        dialog.show();
+    }
     private void combinedPage(){
-        pageTitle("键鼠同屏","精简键盘 + 触控板 · 编辑键与方向键分区","输入文本",this::textInput);
-        combined=new CombinedControlsView(this,hid);combined.setSensitivity(sensitivity);combined.setHapticFeedback(haptics);
+        keyboardHeading(true);
+        combined=new CombinedControlsView(this,hid,false,comboPreset);combined.setSensitivity(sensitivity);combined.setHapticFeedback(haptics);
         body.addView(combined,new LinearLayout.LayoutParams(-1,0,1));
     }
     private LinearLayout compactNavigation(){

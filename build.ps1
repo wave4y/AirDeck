@@ -41,7 +41,7 @@ $manifestXml.Save($manifestFile)
 $compiledResources = Join-Path $buildDir 'resources.zip'
 $resourceApk = Join-Path $buildDir 'resources.apk'
 Run-Tool (Join-Path $toolDir 'aapt2.exe') @('compile', '--dir', (Join-Path $projectDir 'app\src\main\res'), '-o', $compiledResources)
-Run-Tool (Join-Path $toolDir 'aapt2.exe') @('link', '-o', $resourceApk, '--manifest', $manifestFile, '-I', $androidJar, '--java', (Join-Path $buildDir 'generated'), '--min-sdk-version', '28', '--target-sdk-version', '35', '--version-code', '3', '--version-name', '1.2.0', $compiledResources)
+Run-Tool (Join-Path $toolDir 'aapt2.exe') @('link', '-o', $resourceApk, '--manifest', $manifestFile, '-I', $androidJar, '--java', (Join-Path $buildDir 'generated'), '--min-sdk-version', '28', '--target-sdk-version', '35', '--version-code', '4', '--version-name', '1.3.0', $compiledResources)
 $sourceFiles = @(Get-ChildItem -LiteralPath (Join-Path $projectDir 'app\src\main\java'), (Join-Path $buildDir 'generated') -Filter '*.java' -Recurse -File | Select-Object -ExpandProperty FullName)
 if ($sourceFiles.Count -eq 0) { throw 'No Java source files found.' }
 $compilerArguments = @('-J-Duser.language=en', '-J-Dfile.encoding=UTF-8', '-encoding', 'UTF-8', '-source', '8', '-target', '8', '-classpath', $androidJar, '-d', (Join-Path $buildDir 'classes')) + $sourceFiles

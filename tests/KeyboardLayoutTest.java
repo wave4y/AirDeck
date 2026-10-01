@@ -97,6 +97,46 @@ public final class KeyboardLayoutTest {
             if(width>=320){int top=height,bottom=0;for(KeyboardLayout.Key key:region){KeyboardLayout.Bounds b=KeyboardLayout.bounds(area,key,width,height,density);top=Math.min(top,b.top);bottom=Math.max(bottom,b.bottom);}
                 check(top<=Math.round(3*density)&&bottom>=height-Math.round(3*density),"portrait uses available height");}
         }
+        check(KeyboardPreset.values().length==2,"two keyboard presentations");
+        check(KeyboardPreset.STANDARD.label.equals("标准")&&KeyboardPreset.SIMPLE.label.equals("简洁"),"preset labels");
+        check(KeyboardLayout.keys(KeyboardLayout.Area.SIMPLE_FULL).size()==64,"64 simple keyboard keys");
+        check(KeyboardLayout.keys(KeyboardLayout.Area.SIMPLE_MAIN).size()==60,"60 simple main keys");
+        Set<Integer> expectedSimple=new HashSet<>();
+        for(int u=4;u<=39;u++)expectedSimple.add(u);
+        int[] simpleControls={0xe0,0xe1,0xe2,0xe3,40,42,44,54,55,56,80,81,82,79};
+        for(int usage:simpleControls)expectedSimple.add(usage);
+        Set<Integer> previousSimple=new HashSet<>(expectedSimple);
+        expectedSimple.add(41);expectedSimple.add(43);for(int usage=58;usage<=69;usage++)expectedSimple.add(usage);
+        Set<Integer> simpleFull=new HashSet<>(),simpleCombo=new HashSet<>();
+        for(KeyboardLayout.Key key:KeyboardLayout.keys(KeyboardLayout.Area.SIMPLE_FULL)){
+            check(simpleFull.add(key.usage),"simple full unique usage");
+            check(KeyboardLayout.find(key.usage).normal.equals(key.normal),"simple uses standard HID label");
+        }
+        check(simpleFull.equals(expectedSimple),"simple has full common keys plus legacy Esc Tab F1-F12");
+        check(previousSimple.size()==50&&simpleFull.containsAll(previousSimple),"all previous 50 simple functions preserved");
+        check(simpleFull.contains(41)&&simpleFull.contains(43),"legacy Esc and Tab preserved");
+        for(int usage=58;usage<=69;usage++)check(simpleFull.contains(usage),"legacy F key preserved "+usage);
+        for(KeyboardLayout.Key key:KeyboardLayout.keys(KeyboardLayout.Area.SIMPLE_MAIN))check(simpleCombo.add(key.usage),"simple main unique usage");
+        for(KeyboardLayout.Key key:KeyboardLayout.keys(KeyboardLayout.Area.ARROWS))check(simpleCombo.add(key.usage),"simple mouse arrows not duplicated");
+        check(simpleCombo.equals(expectedSimple),"simple standalone and combination expose identical functions");
+        int[] simpleRows={7,7,10,10,9,9,8,4};
+        for(int row=0;row<simpleRows.length;row++){int count=0;for(KeyboardLayout.Key key:KeyboardLayout.keys(KeyboardLayout.Area.SIMPLE_FULL))if(key.y==row)count++;check(count==simpleRows[row],"simple row count "+row);}
+        KeyboardLayout.Area[] simpleAreas={KeyboardLayout.Area.SIMPLE_FULL,KeyboardLayout.Area.SIMPLE_MAIN};
+        for(KeyboardLayout.Area area:simpleAreas)for(int[] size:sizes)for(float density:densities){
+            int width=Math.round(size[0]*density),height=Math.round(size[1]*density);
+            java.util.List<KeyboardLayout.Key> region=KeyboardLayout.keys(area);
+            for(int i=0;i<region.size();i++){
+                KeyboardLayout.Key key=region.get(i);
+                check(key.x>=0&&key.y>=0&&key.x+key.width<=area.width&&key.y+1<=area.height,"simple key-unit bounds");
+                KeyboardLayout.Bounds a=KeyboardLayout.bounds(area,key,width,height,density);
+                check(a.left>=0&&a.top>=0&&a.right<=width&&a.bottom<=height&&a.width()>=0&&a.height()>=0,"simple pixel bounds");
+                if(width>=320)check(a.width()>0&&a.height()>0,"simple keys visible");
+                for(int j=i+1;j<region.size();j++){
+                    KeyboardLayout.Bounds b=KeyboardLayout.bounds(area,region.get(j),width,height,density);
+                    if(a.width()>0&&a.height()>0&&b.width()>0&&b.height()>0)check(!(a.left<b.right&&b.left<a.right&&a.top<b.bottom&&b.top<a.bottom),"simple overlap "+area+" "+i+"/"+j);
+                }
+            }
+        }
         System.out.println("KeyboardLayoutTest: "+assertions+" assertions passed");
     }
 }
