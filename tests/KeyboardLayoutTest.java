@@ -4,6 +4,40 @@ import java.util.Set;
 public final class KeyboardLayoutTest {
     private static int assertions;
     private static void check(boolean value,String message){assertions++;if(!value)throw new AssertionError(message);}
+    private static KeyboardLayout.Key portraitKey(int usage){
+        for(KeyboardLayout.Key key:KeyboardLayout.keys(KeyboardLayout.Area.PORTRAIT_FULL))if(key.usage==usage)return key;
+        throw new AssertionError("missing portrait usage "+usage);
+    }
+    private static void checkPortraitTypingRows(){
+        KeyboardLayout.Area area=KeyboardLayout.Area.PORTRAIT_FULL;
+        KeyboardLayout.Key letter=portraitKey(4);
+        // The portrait layout must make the typing keys wider, rather than merely shrinking an ANSI board.
+        for(int usage=4;usage<=39;usage++){
+            KeyboardLayout.Key key=portraitKey(usage);
+            check(key.width/area.width>=.1f-.00001f,"portrait typing key occupies at least a tenth of the width "+usage);
+            check(Math.abs(key.height-letter.height)<.0001f,"consistent letter and digit heights "+usage);
+        }
+        String[] typingRows={"qwertyuiop","asdfghjkl","zxcvbnm"};
+        float previousY=-1;
+        for(String row:typingRows){
+            KeyboardLayout.Key first=portraitKey(4+row.charAt(0)-'a');
+            check(first.y>previousY,"QWERTY rows remain in typing order");previousY=first.y;
+            float previousRight=-1;
+            for(int i=0;i<row.length();i++){
+                KeyboardLayout.Key key=portraitKey(4+row.charAt(i)-'a');
+                check(Math.abs(key.y-first.y)<.0001f&&key.x>=previousRight-.0001f,"QWERTY letters remain ordered on their row");
+                previousRight=key.x+key.width;
+            }
+        }
+        int[] auxiliary={41,58,59,60,61,62,63,64,65,66,67,68,69,70,71,72,73,74,75,76,77,78};
+        KeyboardLayout.Bounds letterBounds=KeyboardLayout.bounds(area,letter,360,600,1);
+        for(int usage:auxiliary){
+            KeyboardLayout.Key key=portraitKey(usage);
+            check(key.height>0&&key.height<letter.height,"auxiliary rows give height back to typing keys "+usage);
+            KeyboardLayout.Bounds bounds=KeyboardLayout.bounds(area,key,360,600,1);
+            check(bounds.height()<letterBounds.height(),"pixel bounds honor shorter auxiliary keys "+usage);
+        }
+    }
     public static void main(String[] args){
         check(KeyboardLayout.keys().size()==87,"exactly 87 keys");Set<Integer> usages=new HashSet<>();
         for(KeyboardLayout.Key key:KeyboardLayout.keys()){
@@ -79,12 +113,29 @@ public final class KeyboardLayoutTest {
         check(KeyboardLayout.keys(KeyboardLayout.Area.PORTRAIT_FULL).size()==87,"87 portrait keys");
         check(KeyboardLayout.keys(KeyboardLayout.Area.PORTRAIT_MAIN).size()==70,"70 portrait main keys");
         Set<Integer> portraitFull=new HashSet<>(),portraitCombo=new HashSet<>();
-        for(KeyboardLayout.Key key:KeyboardLayout.keys(KeyboardLayout.Area.PORTRAIT_FULL))check(portraitFull.add(key.usage),"portrait full unique");
+        for(KeyboardLayout.Key key:KeyboardLayout.keys(KeyboardLayout.Area.PORTRAIT_FULL)){
+            check(portraitFull.add(key.usage),"portrait full unique");
+            KeyboardLayout.Key base=KeyboardLayout.find(key.usage);
+            check(base.normal.equals(key.normal)&&base.description.equals(key.description),"portrait preserves key label and accessible meaning");
+            check(base.shifted==null?key.shifted==null:base.shifted.equals(key.shifted),"portrait preserves Shift corner legend");
+        }
         check(portraitFull.equals(expected),"portrait full preserves all 87 functions");
+        checkPortraitTypingRows();
         KeyboardLayout.Area[] portraitAreas={KeyboardLayout.Area.PORTRAIT_MAIN,KeyboardLayout.Area.EDIT_ROW,KeyboardLayout.Area.ARROW_ROW};
         for(KeyboardLayout.Area area:portraitAreas)for(KeyboardLayout.Key key:KeyboardLayout.keys(area))check(portraitCombo.add(key.usage),"portrait combo unique");
         check(portraitCombo.equals(expectedCombo),"portrait compact preserves 80 functions");
         KeyboardLayout.Area[] allPortrait={KeyboardLayout.Area.PORTRAIT_FULL,KeyboardLayout.Area.PORTRAIT_MAIN,KeyboardLayout.Area.EDIT_ROW,KeyboardLayout.Area.ARROW_ROW};
+        for(KeyboardLayout.Area area:allPortrait){
+            java.util.List<KeyboardLayout.Key> region=KeyboardLayout.keys(area);
+            for(int i=0;i<region.size();i++){
+                KeyboardLayout.Key a=region.get(i);
+                check(a.x>=0&&a.y>=0&&a.width>0&&a.height>0&&a.x+a.width<=area.width+.0001f&&a.y+a.height<=area.height+.0001f,"portrait key-unit bounds including variable heights "+area+" "+a.usage);
+                for(int j=i+1;j<region.size();j++){
+                    KeyboardLayout.Key b=region.get(j);
+                    check(!(a.x<b.x+b.width-.0001f&&b.x<a.x+a.width-.0001f&&a.y<b.y+b.height-.0001f&&b.y<a.y+a.height-.0001f),"portrait key-unit overlap "+area+" "+a.usage+"/"+b.usage);
+                }
+            }
+        }
         for(KeyboardLayout.Area area:allPortrait)for(int[] size:sizes)for(float density:densities){
             int width=Math.round(size[0]*density),height=Math.round(size[1]*density);java.util.List<KeyboardLayout.Key> region=KeyboardLayout.keys(area);
             for(int i=0;i<region.size();i++){

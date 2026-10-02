@@ -101,7 +101,7 @@ public final class KeyboardView extends ViewGroup {
             super(context);this.spec=spec;setClickable(true);setFocusable(true);setMinimumWidth(0);setMinimumHeight(0);
             setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_YES);
             boolean simple=area==KeyboardLayout.Area.SIMPLE_FULL||area==KeyboardLayout.Area.SIMPLE_MAIN;
-            face.setCornerRadius(dp(simple?8:5));setBackground(face);setOnTouchListener(this);
+            face.setCornerRadius(dp(simple||area==KeyboardLayout.Area.PORTRAIT_FULL?8:5));setBackground(face);setOnTouchListener(this);
             primaryLabel=label(context);primaryLabel.setGravity(Gravity.CENTER);
             primaryLabel.setTypeface(Typeface.create("sans-serif-medium",0));
             addView(primaryLabel,new FrameLayout.LayoutParams(LayoutParams.MATCH_PARENT,LayoutParams.MATCH_PARENT));
@@ -135,23 +135,25 @@ public final class KeyboardView extends ViewGroup {
             return true;
         }
         void showState(boolean pressed,boolean locked){
-            setPressed(pressed);setSelected(locked);face.setColor(pressed?MINT:locked?0xFFEBF3E8:WHITE);
+            boolean utility=area==KeyboardLayout.Area.PORTRAIT_FULL&&(spec.height<1||spec.isModifier()||spec.usage==40||spec.usage==42);
+            setPressed(pressed);setSelected(locked);face.setColor(pressed?MINT:locked?0xFFEBF3E8:utility?0xFFF0F4EE:WHITE);
             face.setStroke(dp(1),pressed?0xFFABCAA5:locked?0xFFABC6A5:0xFFE3E9E1);
             primaryLabel.setTextColor(pressed||locked?GREEN:INK);shiftLabel.setTextColor(pressed?GREEN:0xFF60776B);invalidate();
         }
         void updateTextSize(int width,int height){
             float density=getResources().getDisplayMetrics().density;
             boolean simple=area==KeyboardLayout.Area.SIMPLE_FULL||area==KeyboardLayout.Area.SIMPLE_MAIN;
+            boolean portraitFull=area==KeyboardLayout.Area.PORTRAIT_FULL;
             int length=Math.max(1,primaryLabel.getText().length());
-            boolean navigation=area==KeyboardLayout.Area.EDIT_ROW||area==KeyboardLayout.Area.ARROW_ROW||area==KeyboardLayout.Area.EDIT||area==KeyboardLayout.Area.ARROWS;
-            float size=Math.min((simple?19:navigation?13:15)*density,height*(navigation?.55f:.33f));
+            boolean navigation=area==KeyboardLayout.Area.EDIT_ROW||area==KeyboardLayout.Area.ARROW_ROW||area==KeyboardLayout.Area.EDIT||area==KeyboardLayout.Area.ARROWS||portraitFull&&spec.height<1;
+            float size=Math.min((simple?19:navigation?13:portraitFull?18:15)*density,height*(navigation?.55f:.33f));
             size=Math.min(size,Math.max(0,width-dp(4))/(length*.61f));
             primaryLabel.setTextSize(TypedValue.COMPLEX_UNIT_PX,Math.max(1,size));
             FrameLayout.LayoutParams main=(FrameLayout.LayoutParams)primaryLabel.getLayoutParams();
             main.leftMargin=Math.min(dp(2),width/10);main.rightMargin=main.leftMargin;
             main.topMargin=spec.shifted==null?0:Math.round(height*.18f);
             if(spec.shifted!=null){
-                float legendSize=Math.min((simple?10:9)*density,Math.min(width*.25f,height*.19f));
+                float legendSize=Math.min((simple||portraitFull?10:9)*density,Math.min(width*.25f,height*.19f));
                 shiftLabel.setTextSize(TypedValue.COMPLEX_UNIT_PX,Math.max(1,legendSize));
                 FrameLayout.LayoutParams legend=(FrameLayout.LayoutParams)shiftLabel.getLayoutParams();
                 legend.topMargin=Math.min(dp(2),Math.max(0,height/16));

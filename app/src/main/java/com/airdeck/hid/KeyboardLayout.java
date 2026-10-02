@@ -14,7 +14,7 @@ public final class KeyboardLayout {
     private static final List<Key> COMPACT_KEYS=createCompact();
     private static final List<Key> EDIT_KEYS=createEdit();
     private static final List<Key> ARROW_KEYS=createArrows();
-    private static final List<Key> PORTRAIT_FULL_KEYS=createPortrait(KEYS,true);
+    private static final List<Key> PORTRAIT_FULL_KEYS=createPortraitFull();
     private static final List<Key> PORTRAIT_MAIN_KEYS=createPortrait(COMPACT_KEYS,false);
     private static final List<Key> EDIT_ROW_KEYS=createEditRow();
     private static final List<Key> ARROW_ROW_KEYS=createArrowRow();
@@ -22,7 +22,7 @@ public final class KeyboardLayout {
     private static final List<Key> SIMPLE_MAIN_KEYS=createSimple(false);
     public enum Area {
         FULL(18.5f,6.5f),COMPACT_MAIN(15,6.5f),EDIT(3,2),ARROWS(3,2),
-        PORTRAIT_FULL(15,9,true),PORTRAIT_MAIN(15,7,true),EDIT_ROW(6,1,true),ARROW_ROW(4,1,true),
+        PORTRAIT_FULL(10,8.8f,true),PORTRAIT_MAIN(15,7,true),EDIT_ROW(6,1,true),ARROW_ROW(4,1,true),
         SIMPLE_FULL(10,8,true),SIMPLE_MAIN(10,7,true);
         public final float width,height;
         public final boolean stretchVertically;
@@ -35,8 +35,11 @@ public final class KeyboardLayout {
         public final String normal,shifted,description;
         public final float x,y,width,height;
         Key(int usage,String normal,String shifted,String description,float x,float y,float width){
+            this(usage,normal,shifted,description,x,y,width,1);
+        }
+        Key(int usage,String normal,String shifted,String description,float x,float y,float width,float height){
             this.usage=usage;this.normal=normal;this.shifted=shifted;this.description=description;
-            this.x=x;this.y=y;this.width=width;this.height=1;
+            this.x=x;this.y=y;this.width=width;this.height=height;
         }
         public boolean isModifier(){return usage>=0xe0&&usage<=0xe7;}
         public boolean isLetter(){return usage>=4&&usage<=29;}
@@ -67,7 +70,7 @@ public final class KeyboardLayout {
         float ux=width/area.width,uy=contentHeight/area.height;
         float gx=Math.min(Math.round(3*density),ux*.12f),gy=Math.min(Math.round(4*density),uy*.12f);
         int x=Math.max(0,Math.min(width,Math.round(key.x*ux+gx/2))),y=Math.max(0,Math.min(height,Math.round(offsetY+key.y*uy+gy/2)));
-        int right=Math.max(x,Math.min(width,Math.round((key.x+key.width)*ux-gx/2))),bottom=Math.max(y,Math.min(height,Math.round(offsetY+(key.y+1)*uy-gy/2)));
+        int right=Math.max(x,Math.min(width,Math.round((key.x+key.width)*ux-gx/2))),bottom=Math.max(y,Math.min(height,Math.round(offsetY+(key.y+key.height)*uy-gy/2)));
         return new Bounds(x,y,right,bottom);
     }
     public static final class State {
@@ -140,6 +143,33 @@ public final class KeyboardLayout {
         for(Key key:source)if(key.y>0&&key.x<15)portrait.add(copy(key,key.x,key.y+.5f,key.width));
         if(full){evenRow(portrait,new int[]{73,74,75,76,77,78},7);evenRow(portrait,new int[]{80,82,81,79},8);}
         return Collections.unmodifiableList(portrait);
+    }
+    /** Ten-column typing area; shorter utility rows keep all 87 keys directly available. */
+    private static List<Key> createPortraitFull(){
+        List<Key> portrait=new ArrayList<>();
+        portraitRow(portrait,new int[]{41,58,59,60,61,62,63},0,.62f);
+        portraitRow(portrait,new int[]{64,65,66,67,68,69,70,71,72},.62f,.62f);
+        portraitRow(portrait,new int[]{43,57,53,45,46,47,48,49,51,52},1.38f,.78f);
+        for(int i=0;i<10;i++)portrait.add(copy(find(30+i),i,2.3f,1));
+        simpleLetters(portrait,"qwertyuiop",0,3.3f);
+        simpleLetters(portrait,"asdfghjkl",0,4.3f);
+        portrait.add(copy(find(42),9,4.3f,1));
+        portrait.add(copy(find(0xe1),0,5.3f,1.5f));
+        simpleLetters(portrait,"zxcvbnm",1.5f,5.3f);
+        portrait.add(copy(find(0xe5),8.5f,5.3f,1.5f));
+        int[] bottom={0xe0,0xe3,0xe2,44,54,55,56,40};
+        float[] positions={0,1,2,3,5,6,7,8},widths={1,1,1,2,1,1,1,2};
+        for(int i=0;i<bottom.length;i++)portrait.add(copy(find(bottom[i]),positions[i],6.3f,widths[i]));
+        portraitRow(portrait,new int[]{73,74,75,76,77,78},7.46f,.64f);
+        portraitRow(portrait,new int[]{0xe4,0xe7,0xe6,101,80,82,81,79},8.1f,.7f);
+        return Collections.unmodifiableList(portrait);
+    }
+    private static void portraitRow(List<Key> keys,int[] usages,float y,float height){
+        for(int i=0;i<usages.length;i++){
+            float x=i*10f/usages.length,right=(i+1)*10f/usages.length;
+            Key key=find(usages[i]);
+            keys.add(new Key(key.usage,key.normal,key.shifted,key.description,x,y,right-x,height));
+        }
     }
     private static void evenRow(List<Key> keys,int[] usages,float y){float unit=15f/usages.length;for(int i=0;i<usages.length;i++)keys.add(copy(find(usages[i]),i*unit,y,unit));}
     private static List<Key> createEditRow(){List<Key> keys=new ArrayList<>();int[] usages={73,74,75,76,77,78};for(int i=0;i<usages.length;i++)keys.add(copy(find(usages[i]),i,0,1));return Collections.unmodifiableList(keys);}
