@@ -48,6 +48,7 @@ public final class MainActivity extends Activity implements HidController.Listen
     private TextView statusTitle, statusDetail, headerStatus;
     private TouchpadView pad;
     private GamepadView gamepad;
+    private GamepadLayoutEditor gamepadEditor;
     private GamepadPreset gamepadPreset=GamepadPreset.XBOX;
     private KeyboardPreset keyboardPreset=KeyboardPreset.STANDARD,comboPreset=KeyboardPreset.STANDARD;
     private CombinedControlsView combined;
@@ -100,6 +101,7 @@ public final class MainActivity extends Activity implements HidController.Listen
     @Override public void onSaveInstanceState(Bundle out){out.putInt("tab",tab);super.onSaveInstanceState(out);}
     @Override public void onConfigurationChanged(Configuration c){super.onConfigurationChanged(c);releaseControls();render();}
     @Override public void onBackPressed(){
+        if(gamepadEditor!=null&&gamepadEditor.handleBack())return;
         if(controlFullscreen()){releaseControls();setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);return;}
         if(tab!=0){selectTab(0);return;}super.onBackPressed();
     }
@@ -157,7 +159,7 @@ public final class MainActivity extends Activity implements HidController.Listen
         }
     }
     private void render(){
-        pad=null;gamepad=null;combined=null;statusTitle=null;statusDetail=null;headerStatus=null;
+        pad=null;gamepad=null;gamepadEditor=null;combined=null;statusTitle=null;statusDetail=null;headerStatus=null;
         applyWindowMode();
         if(controlFullscreen()){
             root=column();root.setBackgroundColor(tab==2?0xFF1A2421:BG);
@@ -339,9 +341,12 @@ public final class MainActivity extends Activity implements HidController.Listen
         gamepad=new GamepadView(this);gamepad.setHapticFeedback(haptics);
         gamepad.setPreset(gamepadPreset);gamepad.setImmersive(controlFullscreen());
         gamepad.setListener((buttons,hat,lx,ly,rx,ry,lt,rt)->hid.gamepadState(buttons,hat,lx,ly,rx,ry,lt,rt));
-        body.addView(gamepad,new LinearLayout.LayoutParams(-1,0,1));
+        if(controlFullscreen()){
+            gamepadEditor=new GamepadLayoutEditor(this,gamepad);
+            body.addView(gamepadEditor,new LinearLayout.LayoutParams(-1,0,1));
+        }else body.addView(gamepad,new LinearLayout.LayoutParams(-1,0,1));
         if(!controlFullscreen()){
-            TextView note=text("横屏仅显示手柄 · 系统返回可回到竖屏",10,MUTED,false);note.setGravity(Gravity.CENTER);note.setPadding(0,dp(8),0,dp(4));body.addView(note);
+            TextView note=text("横屏可调整按键 · 系统返回可回到竖屏",10,MUTED,false);note.setGravity(Gravity.CENTER);note.setPadding(0,dp(8),0,dp(4));body.addView(note);
         }
     }
     private void chooseGamepadPreset(){

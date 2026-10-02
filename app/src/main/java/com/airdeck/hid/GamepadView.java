@@ -25,8 +25,14 @@ public final class GamepadView extends View {
     private final RectF[] boxes=new RectF[10];
     private final float[] buttonX=new float[6], buttonY=new float[6], faceRadius=new float[6];
     private final RectF ltBox=new RectF(), rtBox=new RectF();
+    private final SparseArray<RectF> defaultFrames=new SparseArray<>();
     private Listener listener;
+    private Runnable editListener;
     private GamepadPreset preset=GamepadPreset.XBOX;
+    private GamepadLayoutConfig savedLayout=new GamepadLayoutConfig(),draftLayout;
+    private boolean editing;
+    private int selectedControl=-1,dragPointer=-1;
+    private float dragOffsetX,dragOffsetY,leftStickR,rightStickR;
     private boolean haptics=true, immersive, wide;
     private float leftX,leftY,rightX,rightY,stickR,dpadX,dpadY,dpadR,buttonR;
     private float scale=1, offsetX, offsetY, layoutW, layoutH;
@@ -41,7 +47,7 @@ public final class GamepadView extends View {
     public GamepadView(Context context,AttributeSet attrs){
         super(context,attrs);
         for(int i=0;i<boxes.length;i++)boxes[i]=new RectF();
-        setClickable(true);setFocusable(true);updateDescription();
+        setClickable(true);setFocusable(true);loadLayout();updateDescription();
     }
     public void setListener(Listener value){listener=value;}
     public void setHapticFeedback(boolean enabled){haptics=enabled;}
@@ -49,19 +55,91 @@ public final class GamepadView extends View {
     public void setPreset(GamepadPreset value){
         if(value==null)throw new IllegalArgumentException("preset");
         if(preset==value)return;
-        releaseAll();preset=value;updateDescription();layoutControls();invalidate();
+        releaseAll();editing=false;draftLayout=null;selectedControl=-1;dragPointer=-1;
+        preset=value;loadLayout();updateDescription();layoutControls();invalidate();notifyEditChanged();
     }
     public void setImmersive(boolean value){
         if(immersive==value)return;
+        if(editing)cancelLayoutEditing();
         releaseAll();immersive=value;layoutControls();invalidate();
     }
     private void updateDescription(){
-        setContentDescription(preset.label+" 游戏手柄。"+preset.description+"，支持多点触控。"+
+        setContentDescription(preset.label+(editing?" 布局编辑，拖动控件调整位置。":" 游戏手柄。")+preset.description+"，支持多点触控。"+
                 preset.mappingDescription());
     }
 
+    private String layoutPreferenceKey(){return "landscape_v1_"+preset.name();}
+    private void loadLayout(){
+        savedLayout=GamepadLayoutConfig.decode(getContext().getSharedPreferences("gamepad_layouts",Context.MODE_PRIVATE).getString(layoutPreferenceKey(),""));
+    }
+    public void setEditListener(Runnable listener){editListener=listener;}
+    private void notifyEditChanged(){if(editListener!=null)editListener.run();}
+    public boolean isLayoutEditing(){return editing;}
+    public boolean beginLayoutEditing(){
+        if(!immersive||!wide||getWidth()==0||getHeight()==0)return false;
+        releaseAll();draftLayout=savedLayout.copy();editing=true;selectedControl=-1;dragPointer=-1;
+        updateDescription();invalidate();notifyEditChanged();return true;
+    }
+    public void cancelLayoutEditing(){
+        if(!editing)return;
+        releaseAll();editing=false;draftLayout=null;selectedControl=-1;dragPointer=-1;
+        layoutControls();updateDescription();invalidate();notifyEditChanged();
+    }
+    public void saveLayoutEditing(){
+        if(!editing)return;
+        savedLayout=draftLayout.copy();
+        getContext().getSharedPreferences("gamepad_layouts",Context.MODE_PRIVATE).edit().putString(layoutPreferenceKey(),savedLayout.encode()).apply();
+        cancelLayoutEditing();
+    }
+    public void resetEditedLayout(){
+        if(!editing)return;
+        draftLayout=new GamepadLayoutConfig();dragPointer=-1;layoutControls();invalidate();notifyEditChanged();
+    }
+    public int[] getEditableControlIds(){
+        int[] ids=new int[defaultFrames.size()];for(int i=0;i<ids.length;i++)ids[i]=defaultFrames.keyAt(i);return ids;
+    }
+    public String[] getEditableControlLabels(){
+        int[] ids=getEditableControlIds();String[] labels=new String[ids.length];
+        for(int i=0;i<ids.length;i++)labels[i]=controlLabel(ids[i]);return labels;
+    }
+    public void selectEditableControl(int id){
+        if(!editing||defaultFrames.get(id)==null)return;
+        selectedControl=id;dragPointer=-1;invalidate();notifyEditChanged();
+    }
+    public String getSelectedControlLabel(){return selectedControl<0?null:controlLabel(selectedControl);}
+    public int getSelectedControlSizePercent(){
+        if(!editing||selectedControl<0)return 0;
+        GamepadLayoutConfig.Placement p=draftLayout.get(selectedControl);return Math.round((p==null?1:p.size)*100);
+    }
+    public void resizeSelectedControl(float delta){
+        if(!editing||selectedControl<0)return;
+        RectF frame=controlFrame(selectedControl);if(frame==null)return;
+        GamepadLayoutConfig.Placement current=draftLayout.get(selectedControl);
+        placeEditedControl(frame.centerX(),frame.centerY(),(current==null?1:current.size)+delta);
+    }
+    private String controlLabel(int control){
+        int face=faceIndex(control);
+        if(face>=0){
+            if(preset.usesPlayStationSymbols())return new String[]{"叉 ×","圆 ○","方 □","三角 △"}[face];
+            return preset.faceLabel(face);
+        }
+        if(control==LEFT_STICK)return "左摇杆";if(control==RIGHT_STICK)return "右摇杆";if(control==DPAD)return "十字方向键";
+        if(control==LEFT_TRIGGER||control==RIGHT_TRIGGER)return preset.shoulderLabel(control==RIGHT_TRIGGER,true);
+        if(control==4||control==5)return preset.shoulderLabel(control==5,false);
+        if(control==6||control==7)return preset.menuLabel(control==7);
+        return control==8?"L3":"R3";
+    }
+    private void placeEditedControl(float x,float y,float size){
+        RectF base=defaultFrames.get(selectedControl);if(base==null||!editing)return;
+        size=Math.max(GamepadLayoutConfig.MIN_SIZE,Math.min(GamepadLayoutConfig.MAX_SIZE,size));
+        float halfW=base.width()*size/2,halfH=base.height()*size/2;
+        x=Math.max(halfW+3,Math.min(layoutW-halfW-3,x));y=Math.max(halfH+3,Math.min(layoutH-halfH-3,y));
+        draftLayout.put(selectedControl,x/layoutW,y/layoutH,size);
+        layoutControls();invalidate();notifyEditChanged();
+    }
+
     @Override protected void onSizeChanged(int w,int h,int oldw,int oldh){
-        super.onSizeChanged(w,h,oldw,oldh);releaseAll();layoutControls();
+        super.onSizeChanged(w,h,oldw,oldh);releaseAll();dragPointer=-1;layoutControls();
     }
     /** Uniform scaling keeps controls disjoint even in a short portrait preview. */
     private void layoutControls(){
@@ -80,9 +158,9 @@ public final class GamepadView extends View {
         if(preset.hasLeftTrigger())ltBox.set(pad+shoulderW+gap,top,pad+2*shoulderW+gap,top+shoulderH);
         if(preset.hasRightTrigger())rtBox.set(layoutW-pad-2*shoulderW-gap,top,layoutW-pad-shoulderW-gap,top+shoulderH);
         for(int i=0;i<faceRadius.length;i++)faceRadius[i]=0;
-        if(preset==GamepadPreset.ARCADE){layoutArcade();return;}
-        if(preset.isClassic()){layoutClassic();return;}
-        if(preset==GamepadPreset.N64){layoutN64();return;}
+        if(preset==GamepadPreset.ARCADE){layoutArcade();applyCustomLayout();return;}
+        if(preset.isClassic()){layoutClassic();applyCustomLayout();return;}
+        if(preset==GamepadPreset.N64){layoutN64();applyCustomLayout();return;}
         if(wide){
             stickR=preset==GamepadPreset.PSP?58:64;
             dpadR=preset.hasOffsetSticks()?59:62;buttonR=preset==GamepadPreset.PSP?28:26;
@@ -114,6 +192,37 @@ public final class GamepadView extends View {
                 setCenteredBox(boxes[8],leftX,preset.hasOffsetSticks()?214:368,44,24);
                 setCenteredBox(boxes[9],rightX,368,44,24);
             }
+        }
+        applyCustomLayout();
+    }
+    private RectF controlFrame(int control){
+        int face=faceIndex(control);
+        if(face>=0){float r=faceRadius[face];return new RectF(buttonX[face]-r,buttonY[face]-r,buttonX[face]+r,buttonY[face]+r);}
+        if(control>=4&&control<10&&buttonVisible(control))return new RectF(boxes[control]);
+        if(control==LEFT_TRIGGER&&preset.hasLeftTrigger())return new RectF(ltBox);
+        if(control==RIGHT_TRIGGER&&preset.hasRightTrigger())return new RectF(rtBox);
+        if(control==LEFT_STICK&&preset.hasLeftStick())return new RectF(leftX-leftStickR,leftY-leftStickR,leftX+leftStickR,leftY+leftStickR);
+        if(control==RIGHT_STICK&&preset.hasRightStick())return new RectF(rightX-rightStickR,rightY-rightStickR,rightX+rightStickR,rightY+rightStickR);
+        if(control==DPAD&&preset.hasDpad())return new RectF(dpadX-dpadR,dpadY-dpadR,dpadX+dpadR,dpadY+dpadR);
+        return null;
+    }
+    private void applyCustomLayout(){
+        leftStickR=rightStickR=stickR;defaultFrames.clear();
+        for(int id=0;id<=RIGHT_TRIGGER;id++){RectF frame=controlFrame(id);if(frame!=null)defaultFrames.put(id,frame);}
+        // Portrait remains a preset preview; normalized changes belong to landscape only.
+        if(!immersive||!wide)return;
+        GamepadLayoutConfig config=editing?draftLayout:savedLayout;
+        for(int i=0;i<defaultFrames.size();i++){
+            int id=defaultFrames.keyAt(i);GamepadLayoutConfig.Placement p=config.get(id);if(p==null)continue;
+            RectF base=defaultFrames.valueAt(i);float hw=base.width()*p.size/2,hh=base.height()*p.size/2;
+            float x=Math.max(hw+3,Math.min(layoutW-hw-3,p.x*layoutW)),y=Math.max(hh+3,Math.min(layoutH-hh-3,p.y*layoutH));
+            RectF frame=new RectF(x-hw,y-hh,x+hw,y+hh);int face=faceIndex(id);
+            if(face>=0)setFaceButton(face,x,y,hw);
+            else if(id==LEFT_STICK){leftX=x;leftY=y;leftStickR=hw;}
+            else if(id==RIGHT_STICK){rightX=x;rightY=y;rightStickR=hw;}
+            else if(id==DPAD){dpadX=x;dpadY=y;dpadR=hw;}
+            else if(id==LEFT_TRIGGER)ltBox.set(frame);else if(id==RIGHT_TRIGGER)rtBox.set(frame);
+            else boxes[id].set(frame);
         }
     }
     private void layoutArcade(){
@@ -178,6 +287,10 @@ public final class GamepadView extends View {
         c.drawRoundRect(new RectF(0,0,getWidth(),getHeight()),radius,radius,paint);
         if(getWidth()<=0||getHeight()<=0)return;
         c.save();c.translate(offsetX,offsetY);c.scale(scale,scale);
+        if(editing){
+            paint.setColor(Color.argb(35,182,230,185));
+            for(int x=20;x<layoutW;x+=20)for(int y=20;y<layoutH;y+=20)c.drawCircle(x,y,1,paint);
+        }
         if(preset.hasShoulders()){
             drawShoulder(c,boxes[4],preset.shoulderLabel(false,false),(buttons&(1<<4))!=0,false);
             drawShoulder(c,boxes[5],preset.shoulderLabel(true,false),(buttons&(1<<5))!=0,true);
@@ -195,6 +308,14 @@ public final class GamepadView extends View {
             drawSmall(c,9,preset==GamepadPreset.SWITCH?"R PRESS":"R3");
         }
         if(!immersive)text(c,"多点触控 · 支持同时按下",layoutW/2,layoutH-12,10,Color.rgb(124,144,132),false);
+        if(editing&&selectedControl>=0){
+            RectF frame=controlFrame(selectedControl);
+            if(frame!=null){
+                frame.inset(-4,-4);paint.setStyle(Paint.Style.STROKE);paint.setStrokeWidth(1.5f);paint.setColor(MINT);
+                c.drawRoundRect(frame,10,10,paint);paint.setStyle(Paint.Style.FILL);
+                c.drawCircle(frame.left,frame.centerY(),2.5f,paint);c.drawCircle(frame.right,frame.centerY(),2.5f,paint);
+            }
+        }
         c.restore();
     }
     private int sideAccent(boolean right){
@@ -259,6 +380,7 @@ public final class GamepadView extends View {
         text(c,label,r.centerX(),r.centerY(),font,active?INK:MUTED,true);
     }
     private void drawStick(Canvas c,float x,float y,int ax,int ay,boolean right){
+        float stickR=right?rightStickR:leftStickR;
         int accent=sideAccent(right);
         paint.setStyle(Paint.Style.FILL);paint.setColor(Color.rgb(31,43,37));c.drawCircle(x,y,stickR,paint);
         paint.setStyle(Paint.Style.STROKE);paint.setStrokeWidth(1.2f);paint.setColor(Color.rgb(71,88,77));c.drawCircle(x,y,stickR,paint);
@@ -298,6 +420,7 @@ public final class GamepadView extends View {
     private float touchY(MotionEvent e,int i){return(e.getY(i)-offsetY)/scale;}
     @Override public boolean onTouchEvent(MotionEvent e){
         if(!isEnabled())return false;
+        if(editing)return onEditTouch(e);
         int action=e.getActionMasked(),index=e.getActionIndex();
         if(action==MotionEvent.ACTION_DOWN||action==MotionEvent.ACTION_POINTER_DOWN){
             if(action==MotionEvent.ACTION_DOWN){releaseAll();if(getParent()!=null)getParent().requestDisallowInterceptTouchEvent(true);}
@@ -313,6 +436,28 @@ public final class GamepadView extends View {
             if(action==MotionEvent.ACTION_UP){performClick();if(getParent()!=null)getParent().requestDisallowInterceptTouchEvent(false);}
         }else if(action==MotionEvent.ACTION_CANCEL){releaseAll();if(getParent()!=null)getParent().requestDisallowInterceptTouchEvent(false);}
         invalidate();return true;
+    }
+    private boolean onEditTouch(MotionEvent e){
+        int action=e.getActionMasked();
+        if(action==MotionEvent.ACTION_DOWN){
+            if(getParent()!=null)getParent().requestDisallowInterceptTouchEvent(true);
+            float x=touchX(e,0),y=touchY(e,0);RectF selected=controlFrame(selectedControl);
+            int control=selected!=null&&selected.contains(x,y)?selectedControl:hit(x,y);
+            selectedControl=control;dragPointer=control<0?-1:e.getPointerId(0);
+            if(control>=0){RectF frame=controlFrame(control);dragOffsetX=x-frame.centerX();dragOffsetY=y-frame.centerY();
+                if(haptics)performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP);}
+            invalidate();notifyEditChanged();
+        }else if(action==MotionEvent.ACTION_MOVE&&dragPointer>=0){
+            int index=e.findPointerIndex(dragPointer);
+            if(index>=0){GamepadLayoutConfig.Placement p=draftLayout.get(selectedControl);
+                placeEditedControl(touchX(e,index)-dragOffsetX,touchY(e,index)-dragOffsetY,p==null?1:p.size);}
+        }else if(action==MotionEvent.ACTION_UP||action==MotionEvent.ACTION_CANCEL||
+                action==MotionEvent.ACTION_POINTER_UP&&e.getPointerId(e.getActionIndex())==dragPointer){
+            dragPointer=-1;if(getParent()!=null)getParent().requestDisallowInterceptTouchEvent(false);
+            if(action==MotionEvent.ACTION_UP)performClick();
+        }
+        // No game state is dispatched while manipulating the layout.
+        return true;
     }
     private boolean owned(int control){
         for(int i=0;i<fingers.size();i++)if(fingers.valueAt(i).control==control)return true;return false;
@@ -335,13 +480,15 @@ public final class GamepadView extends View {
         return index>=0&&index<preset.faceButtonCount()?index:-1;
     }
     private int hit(float x,float y){
-        for(int i=4;i<10;i++)if(buttonVisible(i)&&expandedContains(boxes[i],x,y,5))return i;
-        if(preset.hasLeftTrigger()&&expandedContains(ltBox,x,y,4))return LEFT_TRIGGER;
-        if(preset.hasRightTrigger()&&expandedContains(rtBox,x,y,4))return RIGHT_TRIGGER;
-        for(int i=0;i<preset.faceButtonCount();i++)if(distance(x-buttonX[i],y-buttonY[i])<=faceRadius[i]+5)return faceControl(i);
-        if(preset.hasLeftStick()&&distance(x-leftX,y-leftY)<=stickR+8)return LEFT_STICK;
-        if(preset.hasRightStick()&&distance(x-rightX,y-rightY)<=stickR+8)return RIGHT_STICK;
+        // Custom layouts can overlap. Touch the visually topmost control first.
+        for(int i=9;i>=6;i--)if(buttonVisible(i)&&expandedContains(boxes[i],x,y,5))return i;
+        for(int i=preset.faceButtonCount()-1;i>=0;i--)if(distance(x-buttonX[i],y-buttonY[i])<=faceRadius[i]+5)return faceControl(i);
+        if(preset.hasRightStick()&&distance(x-rightX,y-rightY)<=rightStickR+8)return RIGHT_STICK;
+        if(preset.hasLeftStick()&&distance(x-leftX,y-leftY)<=leftStickR+8)return LEFT_STICK;
         if(preset.hasDpad()&&Math.abs(x-dpadX)<=dpadR+6&&Math.abs(y-dpadY)<=dpadR+6)return DPAD;
+        if(preset.hasRightTrigger()&&expandedContains(rtBox,x,y,4))return RIGHT_TRIGGER;
+        if(preset.hasLeftTrigger()&&expandedContains(ltBox,x,y,4))return LEFT_TRIGGER;
+        for(int i=5;i>=4;i--)if(buttonVisible(i)&&expandedContains(boxes[i],x,y,5))return i;
         return -1;
     }
     private static boolean expandedContains(RectF r,float x,float y,float extra){
@@ -365,7 +512,7 @@ public final class GamepadView extends View {
                 if(distance(dx,dy)>dpadR*.20f){double angle=Math.atan2(dx,-dy);h=((int)Math.round(angle/(Math.PI/4))+8)%8;}
             }else if((control==LEFT_STICK&&preset.hasLeftStick())||(control==RIGHT_STICK&&preset.hasRightStick())){
                 float x=f.x-(control==LEFT_STICK?leftX:rightX),y=f.y-(control==LEFT_STICK?leftY:rightY);
-                float magnitude=distance(x,y),limit=stickR*.82f;int ax=0,ay=0;
+                float magnitude=distance(x,y),limit=(control==LEFT_STICK?leftStickR:rightStickR)*.82f;int ax=0,ay=0;
                 if(magnitude>limit*.09f){
                     float value=Math.min(1f,(magnitude/limit-.09f)/.91f);
                     ax=Math.round(x/magnitude*value*127);ay=Math.round(y/magnitude*value*127);

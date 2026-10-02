@@ -14,6 +14,10 @@ if ($LASTEXITCODE -ne 0) { throw 'Protocol tests failed.' }
 if ($LASTEXITCODE -ne 0) { throw 'Connection policy tests failed to compile.' }
 & $java -cp $classDir com.airdeck.hid.HidConnectionPolicyTest
 if ($LASTEXITCODE -ne 0) { throw 'Connection policy tests failed.' }
+& $compiler -encoding UTF-8 -d $classDir (Join-Path $projectRoot 'app\src\main\java\com\airdeck\hid\GamepadLayoutConfig.java') (Join-Path $testRoot 'GamepadLayoutConfigTest.java')
+if ($LASTEXITCODE -ne 0) { throw 'Gamepad layout tests failed to compile.' }
+& $java -cp $classDir com.airdeck.hid.GamepadLayoutConfigTest
+if ($LASTEXITCODE -ne 0) { throw 'Gamepad layout tests failed.' }
 & $compiler -encoding UTF-8 -d $classDir (Join-Path $projectRoot 'app\src\main\java\com\airdeck\hid\KeyboardPreset.java') (Join-Path $projectRoot 'app\src\main\java\com\airdeck\hid\KeyboardLayout.java') (Join-Path $testRoot 'KeyboardLayoutTest.java')
 if ($LASTEXITCODE -ne 0) { throw 'Keyboard layout tests failed to compile.' }
 & $java -cp $classDir com.airdeck.hid.KeyboardLayoutTest
