@@ -755,7 +755,16 @@ public final class HidController {
                 if (device.equals(connectedDevice)) releaseAll();
             } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
                 boolean current = device.equals(connectedDevice) || device.equals(connectingDevice);
-                if (!current) return;
+                if (!current) {
+                    // Registration can restore an old virtual cable while a manual host
+                    // choice is pending. Its rejected completion still has to unblock that choice.
+                    if (pendingDevice != null && connectedDevice == null && connectingDevice == null
+                            && device.equals(virtualCableDevice)) {
+                        virtualCableDevice = null;
+                        connectPending();
+                    }
+                    return;
+                }
                 main.removeCallbacks(connectTimeout);
                 connectionLost();
                 clearInputState();
