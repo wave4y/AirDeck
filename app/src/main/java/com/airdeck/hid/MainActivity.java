@@ -386,8 +386,8 @@ public final class MainActivity extends Activity implements HidController.Listen
         if(protocolWarning!=null){TextView warning=text("!  "+protocolWarning+"\n点击查看处理方法",11,0xFF99611D,false);warning.setPadding(0,dp(8),0,0);connection.addView(warning);}
         connection.setOnClickListener(v->showDiagnostics());content.addView(connection);space(content,12);
         LinearLayout intro=column();intro.setPadding(dp(17),dp(16),dp(17),dp(16));intro.setBackground(round(MINT,20));
-        intro.addView(text("让另一台手机发现你",17,INK,true));
-        TextView guide=text("开启可发现后，在另一台安卓手机的蓝牙设置里添加本手机，并确认配对码。已配对设备会显示在下方。",12,GREEN,false);guide.setLineSpacing(dp(3),1);guide.setPadding(0,dp(7),0,dp(12));intro.addView(guide);
+        intro.addView(text("让另一台设备发现你",17,INK,true));
+        TextView guide=text("开启可发现后，在接收端蓝牙设置里添加本机并确认配对码。首次配对后，请在接收端点选本机连接，并允许“输入设备”（若有此选项）。",12,GREEN,false);guide.setLineSpacing(dp(3),1);guide.setPadding(0,dp(7),0,dp(12));intro.addView(guide);
         TextView discover=button("＋  配对新设备",true);discover.setBackground(ripple(INK,12));discover.setTextColor(WHITE);discover.setOnClickListener(v->discoverable());intro.addView(discover,new LinearLayout.LayoutParams(-1,dp(45)));content.addView(intro);space(content,20);
         content.addView(text("已配对设备",12,MUTED,true));space(content,10);
         if(!hasPermissions()){
@@ -420,7 +420,7 @@ public final class MainActivity extends Activity implements HidController.Listen
     }
     private void discoverable(){
         if(!hasPermissions()){requestBluetooth();return;}
-        hid.start();
+        hid.prepareForPairing();
         Intent i=new Intent(BluetoothAdapter.ACTION_REQUEST_DISCOVERABLE);i.putExtra(BluetoothAdapter.EXTRA_DISCOVERABLE_DURATION,120);
         try{startActivityForResult(i,43);}catch(Exception e){toast("请在系统蓝牙设置里开启可发现");startActivity(new Intent(Settings.ACTION_BLUETOOTH_SETTINGS));}
     }
@@ -439,7 +439,7 @@ public final class MainActivity extends Activity implements HidController.Listen
     private void showDiagnostics(){
         String warning=hid.getProtocolWarning();
         String protocol=warning==null?"尚未发现可检测的协议异常。\n本机无法读取接收端缓存，仍需实际测试输入。":warning;
-        new AlertDialog.Builder(this).setTitle("连接诊断").setMessage(hid.getStatusText()+"\n\n"+hid.getAutoReconnectStatus()+"\n\n"+protocol+"\n\n已提交输入报告："+hid.getSentReportCount()+"\n发送失败："+hid.getFailedReportCount()+"\n提交成功只表示本机蓝牙已接受数据。\n\n按字母变成鼠标移动，或连接后没有反应？可能是旧输入协议缓存：\n1. 在两台手机上互相取消配对。\n2. 两台手机都关闭蓝牙，再重新开启。\n3. 关闭其他模拟键鼠 App，保持 AirDeck 在前台。\n4. 重新配对，再测试字母、鼠标与手柄。").setPositiveButton("知道了",null).setNeutralButton("蓝牙设置",(d,w)->startActivity(new Intent(Settings.ACTION_BLUETOOTH_SETTINGS))).show();
+        new AlertDialog.Builder(this).setTitle("连接诊断").setMessage(hid.getStatusText()+"\n\n"+hid.getAutoReconnectStatus()+"\n\n"+protocol+"\n\n已提交输入报告："+hid.getSentReportCount()+"\n发送失败："+hid.getFailedReportCount()+"\n提交成功只表示本机蓝牙已接受数据。\n\n连上后立即断开？请先在接收端蓝牙设置中点选本机，允许“输入设备”（若有此开关），从接收端主动连接一次。连续失败后，自动重连会停止；处理后可点选设备重试。\n\n按字母变成鼠标移动，或连接后没有反应？可能是旧输入协议缓存：\n1. 在两台设备上互相取消配对。\n2. 两台设备都关闭蓝牙，再重新开启。\n3. 关闭其他模拟键鼠 App，保持 AirDeck 在前台。\n4. 重新配对，再测试字母、鼠标与手柄。").setPositiveButton("知道了",null).setNeutralButton("蓝牙设置",(d,w)->startActivity(new Intent(Settings.ACTION_BLUETOOTH_SETTINGS))).show();
     }
     private void showGuide(){new AlertDialog.Builder(this).setTitle("指尖的几个小技巧").setMessage("单指滑动：移动鼠标\n轻点：左键单击\n双指轻点：右键单击\n双指上下滑动：滚动页面\n按住左键再滑动：拖动窗口\n\n连接后，另一台安卓手机会将本机识别为蓝牙输入设备，无需安装接收端 App。").setPositiveButton("知道了",null).show();}
     private void hintIfDisconnected(){if(!hid.isConnected()&&System.currentTimeMillis()-lastHint>3500){lastHint=System.currentTimeMillis();toast("当前未连接，可先体验面板；连接请点右上角");}}

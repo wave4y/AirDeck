@@ -126,7 +126,10 @@ public final class HidController {
         if (!value) {
             cancelAutoReconnect();
             if (automaticConnection && connectingDevice != null && hid != null) {
-                try { hid.disconnect(connectingDevice); }
+                try {
+                    Log.i(TAG, "Disconnect requested: background automatic attempt");
+                    hid.disconnect(connectingDevice);
+                }
                 catch (SecurityException error) { permissionLost(); }
             }
         }
@@ -213,16 +216,19 @@ public final class HidController {
         if (!hasConnectPermission()) { permissionLost(); return false; }
         if (!started) start();
         cancelAutoReconnect();
+        if (isConnected() && device.equals(connectedDevice)) return true;
         reconnectPolicy.select(device.getAddress());
         automaticConnection = false;
         setAutoReconnectStatus(null);
-        if (isConnected() && device.equals(connectedDevice)) return true;
         pendingDevice = device;
         if (connectedDevice != null || connectingDevice != null) {
             releaseAll();
             BluetoothDevice old = connectedDevice != null ? connectedDevice : connectingDevice;
             try {
+                Log.i(TAG, "Disconnect requested: manual host switch");
                 if (hid != null && hid.disconnect(old)) {
+                    main.removeCallbacks(connectTimeout);
+                    main.postDelayed(connectTimeout, 20000);
                     update(State.CONNECTING, "正在切换设备…");
                     return true;
                 }
@@ -245,6 +251,7 @@ public final class HidController {
         try {
             Log.i(TAG, "Requesting HID host connection");
             if (!hid.connect(requested)) {
+                automaticConnection = false;
                 update(State.READY, "连接请求未成功，请在目标设备蓝牙设置中重试");
                 scheduleAutoReconnect();
                 return false;
@@ -269,14 +276,45 @@ public final class HidController {
         BluetoothDevice device = connectedDevice != null ? connectedDevice : connectingDevice;
         if (hid == null || device == null) return;
         try {
+            Log.i(TAG, "Disconnect requested: manual stop");
             if (!hid.disconnect(device)) update(state, "断开请求未成功，请在系统蓝牙设置中断开");
         } catch (SecurityException error) { permissionLost(); }
+    }
+
+    /** Let a new host pair without the remembered host racing it for the HID connection. */
+    public void prepareForPairing() {
+        requireMainThread();
+        start();
+        reconnectPolicy.beginPairing();
+        cancelAutoReconnect();
+        main.removeCallbacks(connectTimeout);
+        pendingDevice = null;
+        automaticConnection = false;
+        releaseAll();
+        BluetoothDevice old = connectedDevice != null ? connectedDevice : connectingDevice;
+        connectionLost();
+        connectedDevice = connectingDevice = virtualCableDevice = null;
+        diagnostics.reset();
+        autoReconnectStatus = "等待新设备连接，已暂停自动连接旧设备";
+        if (old != null && hid != null) {
+            try {
+                Log.i(TAG, "Disconnect requested: pairing a new host");
+                hid.disconnect(old);
+            } catch (SecurityException error) { permissionLost(); return; }
+        }
+        if (registered) update(State.READY, "请在新设备的蓝牙设置中配对并连接");
+    }
+
+    private void connectionLost() {
+        if (connectedDevice != null)
+            reconnectPolicy.disconnected(connectedDevice.getAddress(), SystemClock.elapsedRealtime());
     }
 
     /** Releases every input, unregisters the SDP application and closes the profile proxy. */
     public void close() {
         requireMainThread();
         releaseAll();
+        connectionLost();
         started = false;
         cancelAutoReconnect();
         automaticConnection = false;
@@ -591,10 +629,12 @@ public final class HidController {
             main.post(() -> {
                 if (profile != BluetoothProfile.HID_DEVICE) return;
                 Log.w(TAG, "HID profile proxy disconnected");
+                connectionLost();
                 clearInputState();
                 hid = null;
                 registered = registrationPending = proxyRequested = false;
                 connectedDevice = connectingDevice = null;
+                automaticConnection = false;
                 main.removeCallbacks(startTimeout);
                 main.removeCallbacks(connectTimeout);
                 cancelAutoReconnect();
@@ -613,8 +653,10 @@ public final class HidController {
             registrationPending = false;
             virtualCableDevice = appRegistered ? pluggedDevice : null;
             if (!appRegistered) {
+                connectionLost();
                 clearInputState();
                 connectedDevice = connectingDevice = null;
+                automaticConnection = false;
                 main.removeCallbacks(connectTimeout);
                 cancelAutoReconnect();
                 diagnostics.reset();
@@ -626,7 +668,8 @@ public final class HidController {
                 if (pluggedDevice != null && hid.getConnectionState(pluggedDevice) == BluetoothProfile.STATE_CONNECTED) {
                     onConnectionStateChanged(pluggedDevice, BluetoothProfile.STATE_CONNECTED);
                 } else {
-                    update(State.READY, "已就绪，请连接已配对的另一台安卓手机");
+                    update(State.READY, reconnectPolicy.isPairing()
+                            ? "请在新设备的蓝牙设置中配对并连接" : "已就绪，请连接已配对的另一台安卓设备");
                     if (pendingDevice != null) connectPending();
                     else scheduleAutoReconnect();
                 }
@@ -634,35 +677,51 @@ public final class HidController {
         }
 
         @Override public void onConnectionStateChanged(BluetoothDevice device, int newState) {
-            if (!started || hid == null) return;
-            Log.i(TAG, "onConnectionStateChanged state=" + newState + " registered=" + registered);
-            if (newState == BluetoothProfile.STATE_DISCONNECTED && device.equals(connectingDevice)) {
+            if (!started || hid == null || device == null) return;
+            if (!hasConnectPermission()) { permissionLost(); return; }
+            Log.i(TAG, "onConnectionStateChanged state=" + newState + " registered=" + registered
+                    + " automatic=" + automaticConnection + " attempts=" + reconnectPolicy.attempts());
+            if (newState == BluetoothProfile.STATE_DISCONNECTED || newState == BluetoothProfile.STATE_CONNECTED) {
                 try {
-                    // A timeout can start a fresh attempt before the old callback reaches main.
-                    // Never let that queued old disconnect clear the new attempt's watchdog.
-                    if (hid.getConnectionState(device) != BluetoothProfile.STATE_DISCONNECTED) return;
+                    // A queued event from an old attempt must not clear a newer connection.
+                    int actual = hid.getConnectionState(device);
+                    if (actual != newState) {
+                        Log.i(TAG, "Ignoring stale connection callback");
+                        // A real quick reconnect can overtake this callback. Its disconnected
+                        // interval must still interrupt our continuous-stability measurement.
+                        if (newState == BluetoothProfile.STATE_DISCONNECTED && device.equals(connectedDevice)) {
+                            connectionLost();
+                            clearInputState();
+                            if (actual == BluetoothProfile.STATE_CONNECTED) {
+                                reconnectPolicy.connected(device.getAddress(), SystemClock.elapsedRealtime());
+                            } else if (actual == BluetoothProfile.STATE_CONNECTING) {
+                                connectedDevice = null;
+                                onConnectionStateChanged(device, actual);
+                            }
+                        }
+                        return;
+                    }
                 } catch (SecurityException error) { permissionLost(); return; }
             }
             if (newState == BluetoothProfile.STATE_CONNECTED) {
                 if (!registered) return;
-                // Ignore completion of an obsolete request after a manual stop or host switch.
-                if (!hasConnectPermission()) { permissionLost(); return; }
-                if (!reconnectPolicy.accepts(device.getAddress())
-                        || device.getBondState() != BluetoothDevice.BOND_BONDED
-                        || (!foreground && automaticConnection)
-                        || (pendingDevice != null && !device.equals(pendingDevice))
-                        || (connectingDevice != null && !device.equals(connectingDevice))) {
+                String rejection = connectionRejection(device);
+                if (rejection == null && device.getBondState() != BluetoothDevice.BOND_BONDED) rejection = "host not bonded";
+                if (rejection != null) {
+                    Log.i(TAG, "Disconnect requested: " + rejection);
                     try { hid.disconnect(device); }
                     catch (SecurityException error) { permissionLost(); }
                     return;
                 }
+                if (device.equals(connectedDevice)) return; // Duplicate success cannot renew the retry budget.
+                if (!adoptIncoming(device)) return;
                 main.removeCallbacks(connectTimeout);
                 cancelAutoReconnect();
                 connectedDevice = virtualCableDevice = device;
                 connectingDevice = null;
                 pendingDevice = null;
                 automaticConnection = false;
-                reconnectPolicy.connected(device.getAddress());
+                reconnectPolicy.connected(device.getAddress(), SystemClock.elapsedRealtime());
                 lastDeviceName = deviceLabel(device);
                 connectionPrefs.edit().putString("last_address", device.getAddress())
                         .putString("last_name", lastDeviceName).apply();
@@ -675,21 +734,33 @@ public final class HidController {
                 update(State.CONNECTED, "已连接 " + deviceLabel(device));
                 if (listener != null) listener.onKeyboardLedsChanged(keyboardLeds);
             } else if (newState == BluetoothProfile.STATE_CONNECTING) {
-                if (!hasConnectPermission()) { permissionLost(); return; }
-                if (!reconnectPolicy.accepts(device.getAddress())
-                        || (pendingDevice != null && !device.equals(pendingDevice))
-                        || (connectingDevice != null && !device.equals(connectingDevice))) return;
+                if (!registered || device.equals(connectedDevice) || connectionRejection(device) != null) return;
+                try {
+                    int actual = hid.getConnectionState(device);
+                    if (actual == BluetoothProfile.STATE_DISCONNECTED || actual == BluetoothProfile.STATE_DISCONNECTING) {
+                        Log.i(TAG, "Ignoring stale connecting callback");
+                        return;
+                    }
+                } catch (SecurityException error) { permissionLost(); return; }
+                boolean newAttempt = !device.equals(connectingDevice);
+                if (!adoptIncoming(device)) return;
                 connectingDevice = device;
+                if (newAttempt) {
+                    main.removeCallbacks(connectTimeout);
+                    main.postDelayed(connectTimeout, 20000);
+                }
                 update(State.CONNECTING, "正在连接 " + deviceLabel(device) + "…");
             } else if (newState == BluetoothProfile.STATE_DISCONNECTING) {
                 // A disconnect callback may come from the host; clear delayed input immediately.
                 if (device.equals(connectedDevice)) releaseAll();
             } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
                 boolean current = device.equals(connectedDevice) || device.equals(connectingDevice);
-                if (!current && (connectedDevice != null || connectingDevice != null)) return;
+                if (!current) return;
                 main.removeCallbacks(connectTimeout);
+                connectionLost();
                 clearInputState();
                 connectedDevice = connectingDevice = null;
+                automaticConnection = false;
                 if (device.equals(virtualCableDevice)) virtualCableDevice = null;
                 diagnostics.reset();
                 protocol = BluetoothHidDevice.PROTOCOL_REPORT_MODE;
@@ -778,9 +849,11 @@ public final class HidController {
             if (!device.getAddress().equals(reconnectPolicy.target())) return;
             Log.i(TAG, "onVirtualCableUnplug");
             releaseAll();
+            connectionLost();
             clearInputState();
             pendingDevice = virtualCableDevice = connectedDevice = connectingDevice = null;
             reconnectPolicy.disconnect();
+            automaticConnection = false;
             cancelAutoReconnect();
             diagnostics.reset();
             autoReconnectStatus = "目标设备已移除连接，自动连接已暂停";
@@ -788,6 +861,34 @@ public final class HidController {
             update(registered ? State.READY : State.OFF, "目标设备已移除此 HID 连接，请重新配对或连接");
         }
     };
+
+    /** Explicit choices and active hosts win; an incoming host may supersede a saved-host retry. */
+    private String connectionRejection(BluetoothDevice device) {
+        if (!reconnectPolicy.accepts(device.getAddress())) return "host selection or manual stop";
+        if (connectedDevice != null && !device.equals(connectedDevice)) return "another host already active";
+        if (pendingDevice != null && !device.equals(pendingDevice)) return "manual switch pending";
+        if (connectingDevice != null && !device.equals(connectingDevice) && !automaticConnection)
+            return "another requested host connecting";
+        if (!foreground && automaticConnection && device.equals(connectingDevice)) return "background automatic attempt";
+        return null;
+    }
+
+    private boolean adoptIncoming(BluetoothDevice device) {
+        if (device.equals(connectingDevice)) return true;
+        if (!reconnectPolicy.selectIncoming(device.getAddress())) return false;
+        BluetoothDevice obsolete = connectingDevice;
+        connectingDevice = null;
+        automaticConnection = false;
+        cancelAutoReconnect();
+        main.removeCallbacks(connectTimeout);
+        if (obsolete != null) {
+            try {
+                Log.i(TAG, "Disconnect requested: incoming host superseded automatic attempt");
+                hid.disconnect(obsolete);
+            } catch (SecurityException error) { permissionLost(); return false; }
+        }
+        return true;
+    }
 
     private boolean validHost(BluetoothDevice device) {
         return started && registered && hid != null && device != null
@@ -856,7 +957,7 @@ public final class HidController {
         }
         long delay = reconnectPolicy.reserveDelay();
         if (delay < 0) {
-            setAutoReconnectStatus("暂时无法自动连接，请确认目标设备蓝牙已开启，或点选设备重试");
+            setAutoReconnectStatus("自动重连已停止（最多 4 次）。请在接收端允许输入设备，或主动连接本机；然后点选设备重试");
             return;
         }
         reconnectScheduled = true;
@@ -913,9 +1014,11 @@ public final class HidController {
             }
             else if (newState == BluetoothAdapter.STATE_TURNING_OFF || newState == BluetoothAdapter.STATE_OFF) {
                 releaseAll();
+                connectionLost();
                 registered = registrationPending = proxyRequested = false;
                 connectedDevice = connectingDevice = virtualCableDevice = null;
                 pendingDevice = null;
+                automaticConnection = false;
                 main.removeCallbacks(startTimeout);
                 main.removeCallbacks(connectTimeout);
                 cancelAutoReconnect();
@@ -934,11 +1037,33 @@ public final class HidController {
     };
 
     private final Runnable connectTimeout = () -> {
+        if (pendingDevice != null) {
+            BluetoothDevice old = connectedDevice != null ? connectedDevice : connectingDevice;
+            try {
+                if (hid != null && (old == null || hid.getConnectionState(old) == BluetoothProfile.STATE_DISCONNECTED)) {
+                    connectionLost();
+                    clearInputState();
+                    connectedDevice = connectingDevice = null;
+                    automaticConnection = false;
+                    connectPending();
+                } else {
+                    pendingDevice = null;
+                    update(isConnected() ? State.CONNECTED : State.READY, "切换超时，请先断开当前设备后重试");
+                }
+            } catch (SecurityException error) { permissionLost(); }
+            return;
+        }
         if (connectedDevice != null || connectingDevice == null) return;
         BluetoothDevice timedOutDevice = connectingDevice;
         connectingDevice = null;
+        automaticConnection = false;
         clearInputState();
-        try { if (hid != null) hid.disconnect(timedOutDevice); }
+        try {
+            if (hid != null) {
+                Log.i(TAG, "Disconnect requested: connection timeout");
+                hid.disconnect(timedOutDevice);
+            }
+        }
         catch (SecurityException error) { permissionLost(); return; }
         update(registered ? State.READY : State.ERROR, "连接超时，请确认目标设备蓝牙已开启并完成配对");
         scheduleAutoReconnect();
@@ -950,9 +1075,11 @@ public final class HidController {
     }
 
     private void permissionLost() {
+        connectionLost();
         clearInputState();
         registered = registrationPending = proxyRequested = false;
         connectedDevice = connectingDevice = pendingDevice = null;
+        automaticConnection = false;
         main.removeCallbacks(startTimeout);
         main.removeCallbacks(connectTimeout);
         cancelAutoReconnect();
